@@ -9,8 +9,9 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
-DEVICE = "0" if torch.cuda.is_available() else "cpu"
 
+
+DEVICE = "0" if torch.cuda.is_available() else "cpu"
 
 class RNNModel(nn.Module):
     def __init__(self, 
@@ -46,14 +47,13 @@ class RNNModel(nn.Module):
         model = RNNModel(embed_dim=self.embed_dim, hidden_dim=self.hidden_dim)
         print("Information of model: ")
         torchinfo.summary(model=model, input_size=(batch_size, sequence_length, self.embed_dim))
-    
 
 
 class Pipeline:
-    def __init__(self):
-        pass
+    def __init__(self, data: np.ndarray):
+        self.data = data
 
-    def _create_sequence_data(self, data: np.ndarray, lag: int, ahead: int) -> Tuple[np.ndarray, np.ndarray]:
+    def _create_sequence_data(self, lag: int, ahead: int) -> Tuple[np.ndarray, np.ndarray]:
         """
         Create sequences from time series data for use in time series forecasting.
 
@@ -69,12 +69,13 @@ class Pipeline:
 
         X = []
         y = []
-        for i in range(0, len(data)):
-            X.append(data[i: i + lag]) # get lag sample for X
-            y.append(data[i + lag: i + lag + ahead]) # get ahead sample for y 
+        for i in range(0, len(self.data)):
+            X.append(self.data[i: i + lag]) # get lag sample for X
+            y.append(self.data[i + lag: i + lag + ahead]) # get ahead sample for y 
         return np.array(X), np.array(y)
 
-    def preapare_data(self, data: np.ndarray, lag: int, ahead: int, test_ratio: float, batch_size: int):
+
+    def preapare_data(self, lag: int, ahead: int, test_ratio: float, batch_size: int):
         """
         Prepare the data for the Conv1D model training.
 
@@ -92,7 +93,7 @@ class Pipeline:
         """
         
         # get data transfomed
-        X, y = self._create_sequence_data(data=data, lag=lag, ahead=ahead)
+        X, y = self._create_sequence_data(data=self.data, lag=lag, ahead=ahead)
         
         # split train test data
         X_train, y_train, X_test, y_test = train_test_split((X, y), test_size=test_ratio, random_state=42)
@@ -120,7 +121,7 @@ class Pipeline:
                  optimizer: torch.optim.Adam, 
                  train_loader: DataLoader, 
                  test_loader: DataLoader, 
-                 num_epochs: int):
+                 num_epochs: int) -> Tuple[RNNModel, list]:
         """
         Train the RNN model.
 
@@ -140,12 +141,13 @@ class Pipeline:
         for num_epoch in range(num_epochs):
             model.train()
             running_loss = 0
-            for i, (sequences, label) in enumerate(train_loader, test_loader):
+            for i, (sequences, labels) in enumerate(train_loader, test_loader):
                 optimizer.zero_grad()
+                sequences, labels = sequences.to(DEVICE), labels.to(DEVICE)
 
                 # Forward pass
                 y_pred = model(sequences)
-                loss = criterion(y_pred, label)
+                loss = criterion(y_pred, labels)
 
 
                 # Backward and optimize
@@ -160,8 +162,10 @@ class Pipeline:
         return model, losses
 
 
-
-    def evaluate():
+    def evaluate(model: RNNModel, 
+                 X_test_tensor: torch.tensor, 
+                 y_test_tensor: torch.tensor,
+                 output_dim: int):
         """
         Evaluate the MLP model.
 
@@ -177,10 +181,36 @@ class Pipeline:
         - mse: Mean Squared Error.
         """
 
-        pass
+        model.eval()
+        with torch.no_grad():
+            X_test_tensor = X_test_tensor.to(DEVICE)
+            predictions = model(X_test_tensor)
+            predictions = predictions.view(-1, output_dim).cpu() # Reshape predictions to match y_test
+            y_test = y_test_tensor.numpy()
 
-    def plot_results():
-        pass 
+            print(f'{predictions.shape = }')
+            print(f'{y_test_tensor.shape = }')
+
+
+            r2 = r2_score(y_true=y_test, y_pred=predictions)
+            mae = mean_absolute_error(y_true=y_test, y_pred=predictions)
+            mse = mean_squared_error(y_pred=y_test, y_true=predictions)
+        
+        print(f'R2 Score: {r2}')
+        print(f'MAE: {mae}')
+        print(f'MSE: {mse}')
+
+        return r2, mae, mse
+
+    def plot_results(self, X_test: torch.tensor, y_test: torch.tensor):
+        predictions = self.model(X_test.numpy()).cpu().detach().numpy()
+        y_test = y_test.numpy()
+
+        plt.plot(predictions[: 500, 0], "r", label = "predictions")
+        plt.plot(y_test[: 500, 0], "g", label = "y_test")
+        plt.xlabel("time")
+        plt.ylabel("value")
+        plt.show()
 
 
 if __name__ == "__main__":
