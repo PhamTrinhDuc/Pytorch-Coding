@@ -31,13 +31,14 @@ class RNNModel(nn.Module):
                             bidirectional=False, # don't use bidirectional
                             batch_first=True) # allow batch size in first position
         
-        self.fully_connected = nn.Linear(in_features=hidden_dim,
-                                out_features=output_dim)
+        self.fully_connected = nn.Linear(
+            in_features=hidden_dim,
+            out_features=output_dim)
     
     def forward(self, x):
-        rrn_output, hidden_output = self.model(x)
+        rnn_output, hidden_output = self.model(x)
         last_hidden = hidden_output[:-1, :, :]
-        # last_hidden = rrn_output[:, -1, :] # you can use it instead of the line above
+        # last_hidden = rnn_output[:, -1, :] # you can use it instead of the line above
         output = self.fully_connected(last_hidden)
         return output
     
@@ -49,10 +50,29 @@ class RNNModel(nn.Module):
         torchinfo.summary(model=model, input_size=(batch_size, sequence_length, self.embed_dim))
 
 
-class Pipeline:
-    def __init__(self, data: np.ndarray):
+class PipelineRNN:
+    def __init__(self, data: np.ndarray, 
+                 embed_dim: int, 
+                 hidden_size: int, 
+                 output_dim: int,
+                 batch_size: int = 8,
+                 num_epochs: int = 100,
+                 lag: int = 64, 
+                 ahead: int = 1):
+        
         self.data = data
-
+        self.embed_dim = embed_dim
+        self.hidden_dim = hidden_size
+        self.output_dim = output_dim
+        self.batch_size = batch_size
+        self.epochs = num_epochs
+        self.lag = lag
+        self.ahead = ahead
+        self.model = RNNModel(embed_dim=embed_dim, hidden_dim=hidden_size, output_dim=output_dim)
+        self.criterion = nn.MSELoss()
+        self.optimizer = torch.optim.AdamW(params=self.model.parameters(), lr=1e-5, weight_decay=0.0005)
+        self.train_loader, self.X_test_tensor, self.Y_test_tensor = self.preapare_data()
+        
     def _create_sequence_data(self, lag: int, ahead: int) -> Tuple[np.ndarray, np.ndarray]:
         """
         Create sequences from time series data for use in time series forecasting.
@@ -69,13 +89,13 @@ class Pipeline:
 
         X = []
         y = []
-        for i in range(0, len(self.data)):
+        for i in range(0, len(self.data) - lag - ahead + 1):
             X.append(self.data[i: i + lag]) # get lag sample for X
             y.append(self.data[i + lag: i + lag + ahead]) # get ahead sample for y 
         return np.array(X), np.array(y)
 
 
-    def preapare_data(self, lag: int, ahead: int, test_ratio: float, batch_size: int):
+    def preapare_data(self, ratio: float = 0.3):
         """
         Prepare the data for the Conv1D model training.
 
@@ -93,11 +113,15 @@ class Pipeline:
         """
         
         # get data transfomed
-        X, y = self._create_sequence_data(data=self.data, lag=lag, ahead=ahead)
+        X, y = self._create_sequence_data(lag=self.lag, ahead=self.ahead)
+        X = X.reshape(X.shape[0], -1, 1)
         
         # split train test data
-        X_train, y_train, X_test, y_test = train_test_split((X, y), test_size=test_ratio, random_state=42)
-        
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=ratio, random_state=42)
+        # print(X_train.shape) => (num_sample_train, sequence_length, embed_dim)
+        # print(y_train.shape) => (num_sample_test, output_dim)
+
+
         # convert array data to tensor data
         X_train_tensor = torch.tensor(data=X_train, dtype=torch.float32)
         X_test_tensor = torch.tensor(data=X_test, dtype=torch.float32)
@@ -105,23 +129,13 @@ class Pipeline:
         y_test_tensor = torch.tensor(data=y_test, dtype=torch.float32)
         
         # init dataloader
-        X_train_loader = DataLoader(dataset=X_train_tensor, batch_size=batch_size, shuffle=True, num_workers=2)
-        y_train_loader = DataLoader(dataset=y_train_tensor, batch_size=batch_size, num_workers=2)
-        
-        # you can use it instead of 2 lines above
-        # train_data = TensorDataset(X_train_tensor, y_train_tensor)
-        # train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-        
-        return X_train_loader, y_train_loader, X_test_tensor, y_test_tensor
+        train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+        train_loader = DataLoader(dataset=train_dataset, batch_size=self.batch_size, shuffle=True)
+
+        return train_loader, X_test_tensor, y_test_tensor
 
 
-    def training(self, 
-                 model: RNNModel, 
-                 criterion: nn.MSELoss, 
-                 optimizer: torch.optim.Adam, 
-                 train_loader: DataLoader, 
-                 test_loader: DataLoader, 
-                 num_epochs: int) -> Tuple[RNNModel, list]:
+    def training(self) -> Tuple[RNNModel, list]:
         """
         Train the RNN model.
 
@@ -138,34 +152,33 @@ class Pipeline:
         """
 
         losses = []
-        for num_epoch in range(num_epochs):
-            model.train()
+        for num_epoch in range(self.epochs):
+            self.model.train()
             running_loss = 0
-            for i, (sequences, labels) in enumerate(train_loader, test_loader):
-                optimizer.zero_grad()
+            for i, (sequences, labels) in enumerate(self.train_loader):
+                self.optimizer.zero_grad()
                 sequences, labels = sequences.to(DEVICE), labels.to(DEVICE)
+                # print(next(iter(sequences)).shape)  # => (batch, sequence_length, embed_dim)
+                # print(next(iter(labels)).shape)
 
                 # Forward pass
-                y_pred = model(sequences)
-                loss = criterion(y_pred, labels)
+                y_pred = self.model(sequences)
+                loss = self.criterion(y_pred, labels.unsqueeze(0)) # => thêm 1 chiều vào labels để tránh cảnh báo. Shape ban đầu: [64, 1], sau khi thêm: [1, 64, 1]
 
 
                 # Backward and optimize
                 loss.backward()
-                optimizer.step()
+                self.optimizer.step()
 
                 running_loss += loss.item()
-            epoch_loss = running_loss / len(train_loader)
+            epoch_loss = running_loss / len(self.train_loader)
             losses.append(epoch_loss)
-            print(f'Epoch [{num_epoch+1}/{num_epochs}], Loss: {epoch_loss:.4f}')
+            print(f'Epoch [{num_epoch+1}/{self.epochs}], Loss: {epoch_loss:.4f}')
             
-        return model, losses
+        return self.model, losses
 
 
-    def evaluate(model: RNNModel, 
-                 X_test_tensor: torch.tensor, 
-                 y_test_tensor: torch.tensor,
-                 output_dim: int):
+    def evaluate(self):
         """
         Evaluate the MLP model.
 
@@ -181,15 +194,15 @@ class Pipeline:
         - mse: Mean Squared Error.
         """
 
-        model.eval()
+        self.model.eval()
         with torch.no_grad():
             X_test_tensor = X_test_tensor.to(DEVICE)
-            predictions = model(X_test_tensor)
-            predictions = predictions.view(-1, output_dim).cpu() # Reshape predictions to match y_test
-            y_test = y_test_tensor.numpy()
+            predictions = self.model(X_test_tensor)
+            predictions = predictions.view(-1, self.output_dim).cpu() # Reshape predictions to match y_test
+            y_test = self.y_test_tensor.numpy()
 
             print(f'{predictions.shape = }')
-            print(f'{y_test_tensor.shape = }')
+            print(f'{self.y_test_tensor.shape = }')
 
 
             r2 = r2_score(y_true=y_test, y_pred=predictions)
@@ -202,17 +215,45 @@ class Pipeline:
 
         return r2, mae, mse
 
-    def plot_results(self, X_test: torch.tensor, y_test: torch.tensor):
-        predictions = self.model(X_test.numpy()).cpu().detach().numpy()
-        y_test = y_test.numpy()
+    def plot_results(self, file_path: str):
+        predictions = self.model(self.X_test_tensor.numpy()).cpu().detach().numpy()
+        y_test = self.Y_test_tensor.numpy()
 
         plt.plot(predictions[: 500, 0], "r", label = "predictions")
         plt.plot(y_test[: 500, 0], "g", label = "y_test")
         plt.xlabel("time")
         plt.ylabel("value")
+        plt.savefig(file_path)
         plt.show()
 
+    def save_checkpoint(self, file_path: str):
+        torch.save(obj=self.model, f=file_path)
+
+def main():
+
+    # ------------------ show architecture model
+    # model = RNNModel()
+    # model.show_model(batch_size=2, sequence_length=64)
+
+    # ------------------ Prepare dataset
+    data = pd.read_csv("./data/temp.csv")
+    pipeline = PipelineRNN(data=data["Temperature (C)"], 
+                           embed_dim=1, 
+                           hidden_size=32, 
+                           output_dim=1, 
+                           batch_size=64,
+                           num_epochs=100, 
+                           lag=64, 
+                           ahead=1)
+
+    # ----------------- Training
+    model, losses = pipeline.training()
+    r2, mae, mse = pipeline.evaluate()
+    pipeline.plot_results(file_path="./RNN/results/rnn_time_series.png")
+    pipeline.save_checkpoint(file_path="./RNN/checkpoint/rnn_time_series.pth")
+    print("R2 score: ", r2)
+    print("Mae score: ", mae)
+    print("Mse score: ", mse)
 
 if __name__ == "__main__":
-    model = RNNModel()
-    model.show_model(batch_size=2, sequence_length=64)
+    main()
