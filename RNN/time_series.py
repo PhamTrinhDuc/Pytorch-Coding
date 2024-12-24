@@ -183,17 +183,15 @@ def evaluate(model: RNNModel,
     model.eval()
     with torch.no_grad():
         X_test_tensor = X_test_tensor.to(DEVICE)
+
         predictions = model(X_test_tensor)
-        predictions = predictions.view(-1, output_dim).cpu() # Reshape predictions to match y_test
-        y_test = y_test_tensor.numpy()
+        predictions = predictions.view(-1, output_dim).cpu().detach().numpy()  # Reshape predictions to match y_test
+        y_test = y_test_tensor.cpu().numpy()
 
-        print(f'{predictions.shape = }')
-        print(f'{y_test_tensor.shape = }')
+        r2 = r2_score(y_test, predictions)
+        mae = mean_absolute_error(y_test, predictions)
+        mse = mean_squared_error(y_test, predictions)
 
-
-        r2 = r2_score(y_true=y_test, y_pred=predictions)
-        mae = mean_absolute_error(y_true=y_test, y_pred=predictions)
-        mse = mean_squared_error(y_pred=y_test, y_true=predictions)
     
     print(f'R2 Score: {r2}')
     print(f'MAE: {mae}')
@@ -208,14 +206,16 @@ def plot_results(model: RNNModel,
                  y_test_tensor: torch.tensor,
                  file_path: str):
     
+    X_test_tensor = X_test_tensor.to(DEVICE) 
 
-    predictions = model(X_test_tensor.numpy()).cpu().detach().numpy()
+    predictions = model(X_test_tensor).cpu().detach().numpy()
     y_test = y_test_tensor.numpy()
 
     plt.plot(predictions[: 500, 0], "r", label = "predictions")
     plt.plot(y_test[: 500, 0], "g", label = "y_test")
     plt.xlabel("time")
     plt.ylabel("value")
+    plt.legend()
     plt.savefig(file_path)
     plt.show()
 
@@ -241,7 +241,7 @@ def main():
     # model.show_model(batch_size=2, sequence_length=64)
 
     # ------------------ Prepare dataset
-    data = pd.read_csv("./data/temp.csv")["Temperature (C)"]
+    data = pd.read_csv("./temp.csv")["Temperature (C)"]
     train_test_loader, X_test_tensor, y_test_tensor = preapare_data(data=data,
                                                                lag=Config.lag, 
                                                                ahead=Config.ahead, 
@@ -249,10 +249,7 @@ def main():
                                                                batch_size=Config.batch_size) 
     
     # ----------------- Training
-    model = RNNModel(embed_dim=Config.embed_dim, 
-                     hidden_dim=Config.hidden_dim, 
-                     output_dim=Config.output_dim).to(DEVICE)
-    
+    model = RNNModel(embed_dim=Config.embed_dim, hidden_dim=Config.hidden_dim, output_dim=Config.output_dim).to(DEVICE)
     criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.001)
 
@@ -262,25 +259,17 @@ def main():
                              train_test_loader=train_test_loader,
                              num_epochs=Config.num_epochs)
     
-    save_checkpoint(file_path="./RNN/checkpoint/rnn_time_series.pth")
+    save_checkpoint(model=model.to(DEVICE), file_path="./checkpoint_time_series.pth")
     
     plot_results(model=model, 
                  X_test_tensor=X_test_tensor, 
                  y_test_tensor=y_test_tensor, 
-                 file_path="./RNN/results/rnn_time_series.png")
+                 file_path="./rnn_time_series.png")
     
     r2, mae, mse = evaluate(model=model, 
                             X_test_tensor=X_test_tensor, 
                             y_test_tensor=y_test_tensor, 
                             output_dim=Config.output_dim)
-    
-    plot_results(model=model, 
-                 X_test_tensor=X_test_tensor, 
-                 y_test_tensor=y_test_tensor, 
-                 file_path="./RNN/results/rnn_time_series.png")
-    print("R2 score: ", r2)
-    print("Mae score: ", mae)
-    print("Mse score: ", mse)
 
 if __name__ == "__main__":
     main()
