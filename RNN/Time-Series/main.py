@@ -11,7 +11,7 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 
 
-DEVICE = "0" if torch.cuda.is_available() else "cpu"
+DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 class RNNModel(nn.Module):
     def __init__(self, 
@@ -68,7 +68,7 @@ class PipelineRNN:
         self.epochs = num_epochs
         self.lag = lag
         self.ahead = ahead
-        self.model = RNNModel(embed_dim=embed_dim, hidden_dim=hidden_size, output_dim=output_dim)
+        self.model = RNNModel(embed_dim=embed_dim, hidden_dim=hidden_size, output_dim=output_dim).to(DEVICE)
         self.criterion = nn.MSELoss()
         self.optimizer = torch.optim.AdamW(params=self.model.parameters(), lr=1e-5, weight_decay=0.0005)
         self.train_loader, self.X_test_tensor, self.Y_test_tensor = self.preapare_data()
