@@ -10,7 +10,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 
-
 DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 class RNNModel(nn.Module):
@@ -50,184 +49,190 @@ class RNNModel(nn.Module):
         torchinfo.summary(model=model, input_size=(batch_size, sequence_length, self.embed_dim))
 
 
-class PipelineRNN:
-    def __init__(self, data: np.ndarray, 
-                 embed_dim: int, 
-                 hidden_size: int, 
-                 output_dim: int,
-                 batch_size: int = 8,
-                 num_epochs: int = 100,
-                 lag: int = 64, 
-                 ahead: int = 1):
+def create_sequence_data(data: np.ndarray, lag: int, ahead: int) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Create sequences from time series data for use in time series forecasting.
+
+    Parameters:
+    - data (array-like): The time series data as a list or numpy array.
+    - lag (int): The number of data points in each input sequence.
+    - ahead (int): The number of data points to predict in the future.
+
+    Returns:
+    - X (numpy.ndarray): A 2D array of shape (num_sequences, lag) containing the input sequences.
+    - y (numpy.ndarray): A 2D array of shape (num_sequences, ahead) containing the corresponding labels.
+    """
+
+    X = []
+    y = []
+    for i in range(0, len(data) - lag - ahead + 1):
+        X.append(data[i: i + lag]) # get lag sample for X
+        y.append(data[i + lag: i + lag + ahead]) # get ahead sample for y 
+    return np.array(X), np.array(y)
+
+
+def preapare_data(data: np.ndarray, lag: int, ahead: int, train_ratio: float, batch_size: int):
+    """
+    Prepare the data for the Conv1D model training.
+
+    Parameters:
+    - data: The raw time series data.
+    - lag: The number of time steps to use for predictions.
+    - ahead: The number of time steps ahead to predict.
+    - train_ratio: The ratio of the dataset to include in the train split.
+    - batch_size: The size of the batch for the DataLoader.
+
+    Returns:
+    - train_test_loader: DataLoader for the training set.
+    - X_test_tensor: PyTorch tensor for the test features.
+    - y_test_tensor: PyTorch tensor for the test labels.
+    """
+    
+    # get data transfomed
+    X, y = create_sequence_data(data=data, lag=lag, ahead=ahead)
+    X = X.reshape(X.shape[0], -1, 1)
+    
+    # split train test data
+    train_size = int(len(X) * train_ratio)
+    X_train, X_test = X[:train_size], X[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]    
+    # print(X_train.shape) => (num_sample_train, sequence_length, embed_dim)
+    # print(y_train.shape) => (num_sample_test, output_dim)
+
+
+    # convert array data to tensor data
+    X_train_tensor = torch.tensor(data=X_train, dtype=torch.float32)
+    X_test_tensor = torch.tensor(data=X_test, dtype=torch.float32)
+    y_train_tensor = torch.tensor(data=y_train, dtype=torch.float32)
+    y_test_tensor = torch.tensor(data=y_test, dtype=torch.float32)
+    
+    # init dataloader
+    train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+    train_test_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+
+    return train_test_loader, X_test_tensor, y_test_tensor
+
+
+def training( 
+            model: RNNModel, 
+            criterion: nn.MSELoss, 
+            optimizer: torch.optim.Adam, 
+            train_test_loader: DataLoader, 
+            num_epochs: int) -> Tuple[RNNModel, list]:
+    """
+    Train the RNN model.
+
+    Parameters:
+    - model: The PyTorch model to train.
+    - criterion: The loss function.
+    - optimizer: The optimization algorithm.
+    - train_test_loader: DataLoader for the training set.
+    - num_epochs: The number of epochs to train for.
+
+    Returns:
+    - model: The trained model.
+    - losses: A list of loss values per epoch.
+    """
+
+    losses = []
+    for num_epoch in range(num_epochs):
+        model.train()
+        running_loss = 0
+        for i, (sequences, labels) in enumerate(train_test_loader):
+            optimizer.zero_grad()
+            sequences, labels = sequences.to(DEVICE), labels.to(DEVICE)
+            # print(next(iter(sequences)).shape)  # => (batch, sequence_length, embed_dim)
+            # print(next(iter(labels)).shape)
+
+            # Forward pass
+            y_pred = model(sequences)
+            loss = criterion(y_pred, labels.unsqueeze(0)) # => thêm 1 chiều vào labels để tránh cảnh báo. Shape ban đầu: [64, 1], sau khi thêm: [1, 64, 1]
+
+
+            # Backward and optimize
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+        epoch_loss = running_loss / len(train_test_loader)
+        losses.append(epoch_loss)
+        print(f'Epoch [{num_epoch+1}/{num_epochs}], Loss: {epoch_loss:.4f}')
         
-        self.data = data
-        self.embed_dim = embed_dim
-        self.hidden_dim = hidden_size
-        self.output_dim = output_dim
-        self.batch_size = batch_size
-        self.epochs = num_epochs
-        self.lag = lag
-        self.ahead = ahead
-        self.model = RNNModel(embed_dim=embed_dim, hidden_dim=hidden_size, output_dim=output_dim).to(DEVICE)
-        self.criterion = nn.MSELoss()
-        self.optimizer = torch.optim.AdamW(params=self.model.parameters(), lr=1e-5, weight_decay=0.0005)
-        self.train_loader, self.X_test_tensor, self.Y_test_tensor = self.preapare_data()
-        
-    def _create_sequence_data(self, lag: int, ahead: int) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Create sequences from time series data for use in time series forecasting.
-
-        Parameters:
-        - data (array-like): The time series data as a list or numpy array.
-        - lag (int): The number of data points in each input sequence.
-        - ahead (int): The number of data points to predict in the future.
-
-        Returns:
-        - X (numpy.ndarray): A 2D array of shape (num_sequences, lag) containing the input sequences.
-        - y (numpy.ndarray): A 2D array of shape (num_sequences, ahead) containing the corresponding labels.
-        """
-
-        X = []
-        y = []
-        for i in range(0, len(self.data) - lag - ahead + 1):
-            X.append(self.data[i: i + lag]) # get lag sample for X
-            y.append(self.data[i + lag: i + lag + ahead]) # get ahead sample for y 
-        return np.array(X), np.array(y)
+    return model, losses
 
 
-    def preapare_data(self, ratio: float = 0.3):
-        """
-        Prepare the data for the Conv1D model training.
+def evaluate(model: RNNModel, 
+             X_test_tensor: torch.tensor, 
+             y_test_tensor: torch.tensor,
+             output_dim: int):
+    """
+    Evaluate the MLP model.
 
-        Parameters:
-        - data: The raw time series data.
-        - lag: The number of time steps to use for predictions.
-        - ahead: The number of time steps ahead to predict.
-        - train_ratio: The ratio of the dataset to include in the train split.
-        - batch_size: The size of the batch for the DataLoader.
+    Parameters:
+    - model: The PyTorch model to evaluate.
+    - X_test_tensor: PyTorch tensor for the test features.
+    - y_test_tensor: PyTorch tensor for the test labels.
+    - ahead: The number of time steps ahead that the model predicts.
 
-        Returns:
-        - train_loader: DataLoader for the training set.
-        - X_test_tensor: PyTorch tensor for the test features.
-        - y_test_tensor: PyTorch tensor for the test labels.
-        """
-        
-        # get data transfomed
-        X, y = self._create_sequence_data(lag=self.lag, ahead=self.ahead)
-        X = X.reshape(X.shape[0], -1, 1)
-        
-        # split train test data
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=ratio, random_state=42)
-        # print(X_train.shape) => (num_sample_train, sequence_length, embed_dim)
-        # print(y_train.shape) => (num_sample_test, output_dim)
+    Returns:
+    - r2: R-squared score.
+    - mae: Mean Absolute Error.
+    - mse: Mean Squared Error.
+    """
 
+    model.eval()
+    with torch.no_grad():
+        X_test_tensor = X_test_tensor.to(DEVICE)
+        predictions = model(X_test_tensor)
+        predictions = predictions.view(-1, output_dim).cpu() # Reshape predictions to match y_test
+        y_test = y_test_tensor.numpy()
 
-        # convert array data to tensor data
-        X_train_tensor = torch.tensor(data=X_train, dtype=torch.float32)
-        X_test_tensor = torch.tensor(data=X_test, dtype=torch.float32)
-        y_train_tensor = torch.tensor(data=y_train, dtype=torch.float32)
-        y_test_tensor = torch.tensor(data=y_test, dtype=torch.float32)
-        
-        # init dataloader
-        train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-        train_loader = DataLoader(dataset=train_dataset, batch_size=self.batch_size, shuffle=True)
-
-        return train_loader, X_test_tensor, y_test_tensor
+        print(f'{predictions.shape = }')
+        print(f'{y_test_tensor.shape = }')
 
 
-    def training(self) -> Tuple[RNNModel, list]:
-        """
-        Train the RNN model.
+        r2 = r2_score(y_true=y_test, y_pred=predictions)
+        mae = mean_absolute_error(y_true=y_test, y_pred=predictions)
+        mse = mean_squared_error(y_pred=y_test, y_true=predictions)
+    
+    print(f'R2 Score: {r2}')
+    print(f'MAE: {mae}')
+    print(f'MSE: {mse}')
 
-        Parameters:
-        - model: The PyTorch model to train.
-        - criterion: The loss function.
-        - optimizer: The optimization algorithm.
-        - train_loader: DataLoader for the training set.
-        - num_epochs: The number of epochs to train for.
-
-        Returns:
-        - model: The trained model.
-        - losses: A list of loss values per epoch.
-        """
-
-        losses = []
-        for num_epoch in range(self.epochs):
-            self.model.train()
-            running_loss = 0
-            for i, (sequences, labels) in enumerate(self.train_loader):
-                self.optimizer.zero_grad()
-                sequences, labels = sequences.to(DEVICE), labels.to(DEVICE)
-                # print(next(iter(sequences)).shape)  # => (batch, sequence_length, embed_dim)
-                # print(next(iter(labels)).shape)
-
-                # Forward pass
-                y_pred = self.model(sequences)
-                loss = self.criterion(y_pred, labels.unsqueeze(0)) # => thêm 1 chiều vào labels để tránh cảnh báo. Shape ban đầu: [64, 1], sau khi thêm: [1, 64, 1]
+    return r2, mae, mse
 
 
-                # Backward and optimize
-                loss.backward()
-                self.optimizer.step()
 
-                running_loss += loss.item()
-            epoch_loss = running_loss / len(self.train_loader)
-            losses.append(epoch_loss)
-            print(f'Epoch [{num_epoch+1}/{self.epochs}], Loss: {epoch_loss:.4f}')
-            
-        return self.model, losses
+def plot_results(model: RNNModel, 
+                 X_test_tensor: torch.tensor,
+                 y_test_tensor: torch.tensor,
+                 file_path: str):
+    
 
+    predictions = model(X_test_tensor.numpy()).cpu().detach().numpy()
+    y_test = y_test_tensor.numpy()
 
-    def evaluate(self):
-        """
-        Evaluate the MLP model.
+    plt.plot(predictions[: 500, 0], "r", label = "predictions")
+    plt.plot(y_test[: 500, 0], "g", label = "y_test")
+    plt.xlabel("time")
+    plt.ylabel("value")
+    plt.savefig(file_path)
+    plt.show()
 
-        Parameters:
-        - model: The PyTorch model to evaluate.
-        - X_test_tensor: PyTorch tensor for the test features.
-        - y_test_tensor: PyTorch tensor for the test labels.
-        - ahead: The number of time steps ahead that the model predicts.
-
-        Returns:
-        - r2: R-squared score.
-        - mae: Mean Absolute Error.
-        - mse: Mean Squared Error.
-        """
-
-        self.model.eval()
-        with torch.no_grad():
-            X_test_tensor = X_test_tensor.to(DEVICE)
-            predictions = self.model(X_test_tensor)
-            predictions = predictions.view(-1, self.output_dim).cpu() # Reshape predictions to match y_test
-            y_test = self.y_test_tensor.numpy()
-
-            print(f'{predictions.shape = }')
-            print(f'{self.y_test_tensor.shape = }')
+def save_checkpoint(model: RNNModel, file_path: str):
+    torch.save(obj=model, f=file_path)
 
 
-            r2 = r2_score(y_true=y_test, y_pred=predictions)
-            mae = mean_absolute_error(y_true=y_test, y_pred=predictions)
-            mse = mean_squared_error(y_pred=y_test, y_true=predictions)
-        
-        print(f'R2 Score: {r2}')
-        print(f'MAE: {mae}')
-        print(f'MSE: {mse}')
+class Config: 
+    lag: int = 32
+    ahead: int  = 1
+    train_ratio: int = 0.8
+    embed_dim: int = 1
+    hidden_dim: int = 32
+    output_dim: int = 1
+    batch_size: int = 64
+    num_epochs: int = 20
 
-        return r2, mae, mse
-
-    def plot_results(self, file_path: str):
-        predictions = self.model(self.X_test_tensor.numpy()).cpu().detach().numpy()
-        y_test = self.Y_test_tensor.numpy()
-
-        plt.plot(predictions[: 500, 0], "r", label = "predictions")
-        plt.plot(y_test[: 500, 0], "g", label = "y_test")
-        plt.xlabel("time")
-        plt.ylabel("value")
-        plt.savefig(file_path)
-        plt.show()
-
-    def save_checkpoint(self, file_path: str):
-        torch.save(obj=self.model, f=file_path)
 
 def main():
 
@@ -236,21 +241,43 @@ def main():
     # model.show_model(batch_size=2, sequence_length=64)
 
     # ------------------ Prepare dataset
-    data = pd.read_csv("./data/temp.csv")
-    pipeline = PipelineRNN(data=data["Temperature (C)"], 
-                           embed_dim=1, 
-                           hidden_size=32, 
-                           output_dim=1, 
-                           batch_size=64,
-                           num_epochs=100, 
-                           lag=64, 
-                           ahead=1)
-
+    data = pd.read_csv("./data/temp.csv")["Temperature (C)"]
+    train_test_loader, X_test_tensor, y_test_tensor = preapare_data(data=data,
+                                                               lag=Config.lag, 
+                                                               ahead=Config.ahead, 
+                                                               train_ratio=Config.train_ratio, 
+                                                               batch_size=Config.batch_size) 
+    
     # ----------------- Training
-    model, losses = pipeline.training()
-    r2, mae, mse = pipeline.evaluate()
-    pipeline.plot_results(file_path="./RNN/results/rnn_time_series.png")
-    pipeline.save_checkpoint(file_path="./RNN/checkpoint/rnn_time_series.pth")
+    model = RNNModel(embed_dim=Config.embed_dim, 
+                     hidden_dim=Config.hidden_dim, 
+                     output_dim=Config.output_dim).to(DEVICE)
+    
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.001)
+
+    model, losses = training(model=model, 
+                             criterion=criterion, 
+                             optimizer=optimizer, 
+                             train_test_loader=train_test_loader,
+                             num_epochs=Config.num_epochs)
+    
+    save_checkpoint(file_path="./RNN/checkpoint/rnn_time_series.pth")
+    
+    plot_results(model=model, 
+                 X_test_tensor=X_test_tensor, 
+                 y_test_tensor=y_test_tensor, 
+                 file_path="./RNN/results/rnn_time_series.png")
+    
+    r2, mae, mse = evaluate(model=model, 
+                            X_test_tensor=X_test_tensor, 
+                            y_test_tensor=y_test_tensor, 
+                            output_dim=Config.output_dim)
+    
+    plot_results(model=model, 
+                 X_test_tensor=X_test_tensor, 
+                 y_test_tensor=y_test_tensor, 
+                 file_path="./RNN/results/rnn_time_series.png")
     print("R2 score: ", r2)
     print("Mae score: ", mae)
     print("Mse score: ", mse)
