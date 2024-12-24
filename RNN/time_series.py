@@ -209,6 +209,7 @@ def plot_results(model: RNNModel,
     X_test_tensor = X_test_tensor.to(DEVICE) 
 
     predictions = model(X_test_tensor).cpu().detach().numpy()
+    predictions = predictions.squeeze(0)
     y_test = y_test_tensor.numpy()
 
     plt.plot(predictions[: 500, 0], "r", label = "predictions")
@@ -231,7 +232,7 @@ class Config:
     hidden_dim: int = 32
     output_dim: int = 1
     batch_size: int = 64
-    num_epochs: int = 20
+    num_epochs: int = 1
 
 
 def main():
