@@ -199,6 +199,37 @@ def evaluate(model: RNNModel,
 
     return r2, mae, mse
 
+def inference(model_path: str, input_data, device: str = "cpu"):
+    """
+    Load trained RNN model and perform inference
+    
+    Args:
+        model_path (str): Path to saved model weights
+        input_data (numpy.ndarray): Input data for inference
+        device (str): Device to run inference on ('cpu' or 'cuda')
+        
+    Returns:
+        numpy.ndarray: Model predictions
+    """
+
+    model = load_model(file_path=model_path).to(device=device)
+    model.eval()
+
+    # convert input to tensor and reshape if needed
+    if isinstance(input_data, np.ndarray):
+        input_data = torch.FloatTensor(input_data).to(device=device)
+
+    elif isinstance(input_data, torch.Tensor):
+        input_data = input_data.to(device=device)
+
+    # Add bach dimension if not present
+    if len(input_data) == 2:
+        input_data = input_data.unsqueeze(0)
+    
+    with torch.no_grad():
+        predictions = model(input_data)
+    predictions = predictions.cpu().detach().numpy()
+    return predictions
 
 
 def plot_results(model: RNNModel, 
@@ -223,6 +254,12 @@ def plot_results(model: RNNModel,
 def save_checkpoint(model: RNNModel, file_path: str):
     torch.save(obj=model, f=file_path)
 
+def load_model(file_path: str, device: str = "cpu") -> RNNModel:
+    model = RNNModel()
+    model.load_state_dict(torch.load(f=file_path, 
+                          map_location=torch.device(device)))
+    return model
+
 
 class Config: 
     lag: int = 32
@@ -232,7 +269,7 @@ class Config:
     hidden_dim: int = 32
     output_dim: int = 1
     batch_size: int = 64
-    num_epochs: int = 1
+    num_epochs: int = 50
 
 
 def main():
@@ -242,35 +279,43 @@ def main():
     # model.show_model(batch_size=2, sequence_length=64)
 
     # ------------------ Prepare dataset
-    data = pd.read_csv("./temp.csv")["Temperature (C)"]
-    train_test_loader, X_test_tensor, y_test_tensor = preapare_data(data=data,
-                                                               lag=Config.lag, 
-                                                               ahead=Config.ahead, 
-                                                               train_ratio=Config.train_ratio, 
-                                                               batch_size=Config.batch_size) 
+    # data = pd.read_csv("./data/temp.csv")["Temperature (C)"]
+    # train_test_loader, X_test_tensor, y_test_tensor = preapare_data(data=data,
+    #                                                            lag=Config.lag, 
+    #                                                            ahead=Config.ahead, 
+    #                                                            train_ratio=Config.train_ratio, 
+    #                                                            batch_size=Config.batch_size) 
     
     # ----------------- Training
-    model = RNNModel(embed_dim=Config.embed_dim, hidden_dim=Config.hidden_dim, output_dim=Config.output_dim).to(DEVICE)
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.001)
+    # model = RNNModel(embed_dim=Config.embed_dim, hidden_dim=Config.hidden_dim, output_dim=Config.output_dim).to(DEVICE)
+    # criterion = nn.MSELoss()
+    # optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.001)
 
-    model, losses = training(model=model, 
-                             criterion=criterion, 
-                             optimizer=optimizer, 
-                             train_test_loader=train_test_loader,
-                             num_epochs=Config.num_epochs)
-    
-    save_checkpoint(model=model.to(DEVICE), file_path="./checkpoint_time_series.pth")
-    
-    plot_results(model=model, 
-                 X_test_tensor=X_test_tensor, 
-                 y_test_tensor=y_test_tensor, 
-                 file_path="./rnn_time_series.png")
-    
-    r2, mae, mse = evaluate(model=model, 
-                            X_test_tensor=X_test_tensor, 
-                            y_test_tensor=y_test_tensor, 
-                            output_dim=Config.output_dim)
+    # model, losses = training(model=model, 
+    #                          criterion=criterion, 
+    #                          optimizer=optimizer, 
+    #                          train_test_loader=train_test_loader,
+    #                          num_epochs=Config.num_epochs)
+    # ----------------- Save model
+    # save_checkpoint(model=model.to(DEVICE), file_path="./RNN/checkpoints/checkpoint_time_series.pth")
+    # # ----------------- Plot results
+    # plot_results(model=model, 
+    #              X_test_tensor=X_test_tensor, 
+    #              y_test_tensor=y_test_tensor, 
+    #              file_path="./RNN/results/rnn_time_series.png")
+    # ----------------- Evaluate model using 3 metrics: r2, mae, mse
+    # r2, mae, mse = evaluate(model=model, 
+    #                         X_test_tensor=X_test_tensor, 
+    #                         y_test_tensor=y_test_tensor, 
+    #                         output_dim=Config.output_dim)
+
+    # ----------------- inference
+    model_path = "./RNN/checkpoints/checkpoint_time_series.pth"
+
+    input_data = np.random.randn(1, 10, 1)
+    predictions = inference(model_path=model_path, input_data=input_data, device=DEVICE)
+    print(predictions)
+
 
 if __name__ == "__main__":
     main()
