@@ -36,7 +36,7 @@ class RNNModel(nn.Module):
     
     def forward(self, x):
         rnn_output, hidden_output = self.model(x)
-        last_hidden = hidden_output[:-1, :, :]
+        last_hidden = hidden_output[-1, :, :]
         # last_hidden = rnn_output[:, -1, :] # you can use it instead of the line above
         output = self.fully_connected(last_hidden)
         return output
@@ -279,7 +279,7 @@ def main():
     # model.show_model(batch_size=2, sequence_length=64)
 
     # ------------------ Prepare dataset
-    # data = pd.read_csv("./data/temp.csv")["Temperature (C)"]
+    # data = pd.read_csv("./RNN/data/temp.csv")["Temperature (C)"]
     # train_test_loader, X_test_tensor, y_test_tensor = preapare_data(data=data,
     #                                                            lag=Config.lag, 
     #                                                            ahead=Config.ahead, 
