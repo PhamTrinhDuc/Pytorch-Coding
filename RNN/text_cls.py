@@ -7,45 +7,85 @@ import string
 import torch.nn as nn
 import torchinfo
 import torchtext 
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    recall_score,
+    precision_score,
+    confusion_matrix,
+    roc_auc_score
+)
 from torch.utils.data import DataLoader
 from datasets import Dataset
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import build_vocab_from_iterator
 torchtext.disable_torchtext_deprecation_warning()
 
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+class Config: 
+    sequence_length: int = 500
+    vocab_size: int = 20000
+    embedding_dim: int = 128
+    hidden_dim: int = 64
+    output_dim: int = 2
+    num_layer: int = 2
+    is_bidirectional: bool = True
+    dropout_prob: float = 0.1
+
+    batch_size: int = 64
+    num_epochs: int = 30
+    lr: float = 0.001
+
+    path_model: str = "./LSTM/checkpoint"
+    path_result_loss: str = "./LSTM/results/loss.png"
 
 
 class RNNClsText(nn.Module):
-    def __init__(self, embed_dim: str, 
+    def __init__(self, 
+                 embed_dim: str, 
                  hidden_dim: str, 
                  vocab_size: int,
                  output_dim: int = 2, 
-                 num_layer: int = 2):
+                 num_layer: int = 2,
+                 is_bidirectional: bool = False):
         super().__init__()
         self.embed_model = nn.Embedding(num_embeddings=vocab_size,
                                         embedding_dim=embed_dim)
         
+        self.dropout = nn.Dropout(p=Config.dropout_prob)
+        self.norm = nn.LayerNorm(normalized_shape=hidden_dim)
+
         self.rnn = nn.RNN(input_size=embed_dim, 
                                 hidden_size=hidden_dim, 
                                 num_layers=num_layer, 
-                                bidirectional=True, 
+                                bidirectional=is_bidirectional, 
                                 batch_first=True)
         
-        self.fully_connected = nn.Linear(in_features=hidden_dim, 
-                                         out_features=output_dim)
+        self.fc1 = nn.Linear(in_features=hidden_dim, 
+                             out_features=16)
+        
+        self.fc2 = nn.Linear(in_features=16, 
+                             out_features=output_dim)
+        self.relu = nn.ReLU()
+
 
     def forward(self, x):
         embedding = self.embed_model(x)
         rnn_output, hidden_output = self.rnn(embedding) # input: [N, sequence_length, embed_dim]
         last_hidden = hidden_output[-1, :, :] # hidden_output: [num_layers, batch_size, hidden_dim]
         # last_hidden = rnn_output[:, -1, :] # rnn_output: [N, sequence_length, hidden_dim]
-        output = self.fully_connected(last_hidden)
-        return last_hidden
+        output = self.norm(last_hidden)
+        output = self.dropout(output)
+        output = self.fc1(output)
+        output = self.relu(output)
+        output = self.dropout(output)
+        output = self.fc2(output)
+        return output
 
 
 class ProcessingData:
-    vocab_size = 20000
-    batch_size = 64
 
     def __init__(self):
         self.train_data, self.val_data, self.test_data = self._prepare_data()
@@ -54,9 +94,9 @@ class ProcessingData:
         self.text_pipeline = lambda x: self.vocab(self.tokenizer(x))
 
     def _prepare_data(self) -> tuple[Dataset, Dataset, Dataset]:
-        df_train = pd.read_csv("RNN/data/cls_text/train.csv")
-        df_val = pd.read_csv("RNN/data/cls_text/val.csv")
-        df_test = pd.read_csv("RNN/data/cls_text/test.csv")
+        df_train = pd.read_csv("./data/cls_text/train.csv")
+        df_val = pd.read_csv("./data/cls_text/val.csv")
+        df_test = pd.read_csv("./data/cls_text/test.csv")
 
         def preprocess_text(text) -> str:
             # remove URLs https://www.
@@ -109,7 +149,6 @@ class ProcessingData:
 
     def _build_vocab(self):
         """build vocabulary to tokenizer text"""
-        vocab_size = self.vocab_size
 
         def yield_tokens(data_iter):
             for data in data_iter:
@@ -118,7 +157,7 @@ class ProcessingData:
         vocab = build_vocab_from_iterator(
             iterator=yield_tokens(self.train_data['sentence']),
             min_freq=3,
-            max_tokens=vocab_size,
+            max_tokens=Config.vocab_size,
             specials=["<pad>", "</s>", "<unk>"])
         vocab.set_default_index(vocab["<unk>"])
         return vocab
@@ -141,27 +180,125 @@ class ProcessingData:
         return input_ids, label_ids
     
     def create_dataloader(self):
-        return DataLoader(dataset = self.train_data, 
-                          batch_size=self.batch_size,
-                          collate_fn=self._collate_batch,
-                          shuffle=True, ), \
-               DataLoader(dataset=self.val_data, 
-                          batch_size=self.batch_size,
-                          collate_fn=self._collate_batch,
-                          shuffle=False)
+        return (
+            DataLoader(dataset = self.train_data, 
+                       batch_size=Config.batch_size,
+                       collate_fn=self._collate_batch,
+                       shuffle=True, ),
+            DataLoader(dataset=self.val_data, 
+                       batch_size=Config.batch_size,
+                       collate_fn=self._collate_batch,
+                       shuffle=False), 
+            DataLoader(dataset=self.test_data,
+                       batch_size=Config.batch_size,
+                       collate_fn=self._collate_batch,
+                       shuffle=False)
+        )
+
+
+def evaluate():
+    pass
+
+
+def training(model: RNNClsText,
+             criterion: nn.MSELoss,
+             optimizer: torch.optim.AdamW,
+             train_dataloader: DataLoader,
+             val_dataloader: DataLoader,
+             num_epochs: int):
+    train_losses = []
+    val_losses = []
+
+    for num_epoch in range(num_epochs):
+
+        batch_train_loss = []
+        batch_val_loss =[]
+
+        model.train()
+        for inputs, labels in train_dataloader:
+            optimizer.zero_grad()
+            inputs = inputs.to(DEVICE), labels.to(DEVICE)
+
+            predictions = model(inputs)
+            loss = criterion(predictions, labels)
+            batch_train_loss.append(loss.item())
+
+            loss.backward()
+            optimizer.step()
+
+        epoch_train_loss = sum(batch_train_loss) / len(batch_train_loss)
+        train_losses.append(epoch_train_loss)
+
+        model.eval()
+        with torch.no_grad():
+            for inputs, labels in val_dataloader:
+                inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
+                predictions = model(inputs)
+                batch_val_loss.append(predictions.item())
+        
+        epoch_val_loss= sum(batch_val_loss) / len(batch_val_loss)
+        val_losses.append(epoch_val_loss)
+
+    return train_losses, val_losses
+
+def inference():
+    pass
+
+
+def plot_loss(train_losses: list, val_losses: list, storage_results:str = None): 
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(12, 5))
+    ax[0].plot(train_losses)
+    ax[0].set_title("Training Loss")
+    ax[0].set_xlabel("Epoch")
+    ax[0].set_ylabel("Loss")
+
+    ax[1].plot(val_losses)
+    ax[1].set_title("Evaluate Loss")
+    ax[1].set_xlabel("Epoch")
+    ax[1].set_ylabel("Loss")
+
+    if storage_results:
+        plt.savefig(storage_results)
+    plt.show()
+
+
+def plot_difference():
+    pass 
+
+
+def save_model(model: RNNClsText) -> None:
+    torch.save(obj=model.state_dict(), 
+               f=Config.path_model)
+
+
+def load_model() -> RNNClsText:
+    model = RNNClsText(embed_dim=Config.embedding_dim, 
+                       hidden_dim=Config.hidden_dim,
+                       output_dim=Config.output_dim,
+                       vocab_size=Config.vocab_size,
+                       num_layer=Config.num_layer,
+                       is_bidirectional=Config.is_bidirectional)
+    
+    model.load_state_dict(torch.load(f=Config.path_model, 
+                                     map_location=torch.device(DEVICE)))
+    return model
+
+
 
 def main():
     processor = ProcessingData()
     # print(processor.vocab.get_stoi())
     
     # ----------------- init data loader
-    train_dataloader, val_dataloader = processor.create_dataloader()
+    train_dataloader, val_dataloader, test_dataloader = processor.create_dataloader()
 
     # ---------------- init model
-    model = RNNClsText(embed_dim=128, 
-                       hidden_dim=64,
-                       vocab_size=processor.vocab_size,
-                       num_layer=2)
+    model = RNNClsText(embed_dim=Config.embedding_dim, 
+                       hidden_dim=Config.hidden_dim,
+                       output_dim=Config.output_dim,
+                       vocab_size=Config.vocab_size,
+                       num_layer=Config.num_layer,
+                       is_bidirectional=Config.is_bidirectional)
     
     torchinfo.summary(model=model)
 
