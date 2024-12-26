@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 from datasets import Dataset
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import build_vocab_from_iterator
+from torch.nn.functional import softmax
 torchtext.disable_torchtext_deprecation_warning()
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -240,7 +241,6 @@ def training(model: RNNClsText,
     return train_losses, val_losses
 
 
-
 def evaluate(model: RNNClsText, 
              data_loader: DataLoader,
              binary: bool = True) -> tuple:
@@ -295,8 +295,28 @@ def evaluate(model: RNNClsText,
     return acc_score, f1, recall, precision, confusion_mt, roc_auc
 
 
-def inference():
-    pass
+def inference(text: str):
+    
+    tokenizer = get_tokenizer("basic_english")
+    
+    model = load_model()
+
+    vocab = ProcessingData()._build_vocab()
+    text_pipeline = lambda x: vocab(tokenizer(x))
+
+    text_list = []
+    text_processed = text_pipeline(text)[:Config.sequence_length]
+    if len(text_processed) < Config.sequence_length:
+        pad_size = Config.sequence_length - len(text_processed)
+        text_processed = text_processed + [vocab['</s>']] + vocab['<pad>'] * pad_size
+    text_list.append(text_processed)
+    input_ids = torch.tensor(text_list, dtype=torch.int64)
+
+    with torch.no_grad():
+        logits = model(input_ids)
+        probabilities = softmax(logits, dim=-1)  
+        predicted_label = torch.argmax(probabilities, dim=-1).item() 
+        return predicted_label
 
 
 def plot_loss(train_losses: list, val_losses: list, storage_results: str = None): 
@@ -328,10 +348,6 @@ def plot_loss(train_losses: list, val_losses: list, storage_results: str = None)
             print(f"Error while store results: {e}")
 
     plt.show()
-
-
-def plot_difference():
-    pass 
 
 
 def save_model(model: RNNClsText) -> None:
@@ -368,7 +384,7 @@ def main():
                        is_bidirectional=Config.is_bidirectional)
     
     torchinfo.summary(model=model)
-    
+
 
 if __name__ == "__main__":
     main()
