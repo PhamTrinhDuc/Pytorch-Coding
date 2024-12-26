@@ -22,12 +22,12 @@ class Config:
     ahead: int = 1 # predict 1 temperature later
     val_ratio: float = 0.2
     test_ratio: float = 0.1
-    num_epochs: int = 50
+    num_epochs: int = 30
     batch_size: int = 32
     lr: float = 0.001
     dropout_prob: float = 0.2
-    path_model: str = "./LSTM/checkpoint/time_series.pth"
-    path_results_loss: str = "./LSTM/results/loss.png"
+    path_model: str = "./time_series.pth"
+    path_results_loss: str = "./loss.png"
 
 
 class LSTMTimeSeries(nn.Module):
@@ -42,7 +42,8 @@ class LSTMTimeSeries(nn.Module):
         self.model = nn.LSTM(input_size=embed_dim, 
                              hidden_size=hidden_dim,
                              num_layers=num_layer,
-                             bidirectional=is_bidirectional)
+                             bidirectional=is_bidirectional,
+                             batch_first=True)
         
         self.dropout = nn.Dropout(p=dropout_prob)
         self.norm = nn.LayerNorm(normalized_shape=hidden_dim)
@@ -82,7 +83,7 @@ def create_sequence_data(
         features.append(df[i: i + lag])
         labels.append(df[i+lag: i + lag + ahead])
     
-    return features, labels
+    return np.array(features), np.array(labels)
 
 
 class TemperatureDataset(Dataset):
@@ -114,13 +115,23 @@ def prepare_data(data: np.ndarray,
                  val_ratio: float = 0.2):
     # create sequence data features and labels
     X, y = create_sequence_data(df=data, lag=lag, ahead=ahead)
+    X = X.reshape(X.shape[0], -1, 1) # reshape: [sequence_length, lag, embed_dim]
+
 
     # create train test for data time series
     test_size = int(test_ratio * len(X))
     val_size = int(val_ratio * len(X))
     train_size = len(X) - test_size - val_size
-    X_train, X_val, X_test = X[:train_size], X[train_size: train_size + val_size], X[train_size + val_size: ]
-    y_train, y_val, y_test = y[:train_size], y[train_size: train_size + val_size], y[train_size + val_size: ]
+    X_train, X_val, X_test = (
+        np.array(X[:train_size]), 
+        np.array(X[train_size: train_size + val_size]), 
+        np.array(X[train_size + val_size: ])
+    )
+    y_train, y_val, y_test = (
+        np.array(y[:train_size]), 
+        np.array(y[train_size: train_size + val_size]), 
+        np.array(y[train_size + val_size: ])
+    )
     
     # init data with custom dataset
     train_dataset  = TemperatureDataset(X=X_train, y=y_train)
@@ -194,7 +205,6 @@ def fit(model: LSTMTimeSeries,
         train_loss = sum(batch_train_losses) / len(batch_train_losses)
         train_losses.append(train_losses)
 
-
         # evaluate model with validation set 
         model.eval()
         batch_val_losses = []
@@ -211,7 +221,7 @@ def fit(model: LSTMTimeSeries,
     return train_losses, val_losses
 
 
-def inference(model_path: str, input_data, device: str = "cpu"):
+def inference(input_data, device: str = "cpu"):
     """
     Load trained LSTM model and perform inference
     
@@ -224,7 +234,7 @@ def inference(model_path: str, input_data, device: str = "cpu"):
         numpy.ndarray: Model predictions
     """
 
-    model = load_model(file_path=model_path).to(device=device)
+    model = load_model().to(device=device)
 
     # convert input to tensor and reshape if needed
     if isinstance(input_data, np.ndarray):
@@ -267,7 +277,7 @@ def plot_difference(y_pred: list, y: list, storage_path: str = None):
     y_to_plot = y.flatten()
     pred_to_plot = y_pred.flatten()
 
-    plt.plot(times,y_to_plot, color="steeblue",marker="o", label="True value")
+    plt.plot(times,y_to_plot, color="steelblue",marker="o", label="True value")
     plt.plot(times, pred_to_plot, color="orangered", marker="X", label="Prediction")
 
     plt.title("Temperature in every hours")
@@ -284,7 +294,7 @@ def save_model(model: LSTMTimeSeries, path_model: str) -> None:
                f=path_model)
 
 
-def load_model(path_model: str) -> LSTMTimeSeries:
+def load_model() -> LSTMTimeSeries:
     model = LSTMTimeSeries(embed_dim=Config.embed_dim, 
                            hidden_dim=Config.hidden_dim,
                            output_dim=Config.output_dim,
@@ -300,28 +310,29 @@ def load_model(path_model: str) -> LSTMTimeSeries:
 def main():
     # ---------------------------- show architecture model
     model = LSTMTimeSeries(embed_dim=Config.embed_dim, 
-                           hidden_dim=Config.hidden_dim,
-                           output_dim=Config.output_dim,
-                           dropout_prob=Config.dropout_prob,
-                           num_layer=Config.num_layer,
-                           is_bidirectional=Config.is_bidirectional)
+                            hidden_dim=Config.hidden_dim,
+                            output_dim=Config.output_dim,
+                            dropout_prob=Config.dropout_prob,
+                            num_layer=Config.num_layer,
+                            is_bidirectional=Config.is_bidirectional)
     torchinfo.summary(model=model, input_size=(1, Config.lag, Config.embed_dim))
 
     # ---------------------------- prepare dataset
-    data = pd.read_csv("data/temp.csv")["Temperature (C)"]
+    data = pd.read_csv("./temp.csv")["Temperature (C)"]
     train_dataloader, val_dataloader, test_dataloader = prepare_data(data=data,
-                                                                     lag=Config.lag,
-                                                                     ahead=Config.ahead,
-                                                                     batch_size=Config.batch_size,
-                                                                     test_ratio=Config.test_ratio,
-                                                                     val_ratio=Config.val_ratio)
+                                                                        lag=Config.lag,
+                                                                        ahead=Config.ahead,
+                                                                        batch_size=Config.batch_size,
+                                                                        test_ratio=Config.test_ratio,
+                                                                        val_ratio=Config.val_ratio)
     # ----------------------------- training 
     criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=Config.lr)
     train_losses, val_losses = fit(model=model, criterion=criterion, optimizer=optimizer, 
-                                   train_loader=train_dataloader,
-                                   val_loader=val_dataloader, 
-                                   num_epochs=Config.num_epochs)
+                                    train_loader=train_dataloader,
+                                    val_loader=val_dataloader, 
+                                    num_epochs=Config.num_epochs)
+    save_model(model=model, path_model=Config.path_model)
     
     # ------------------------------ plot loss train and loss validation
     plot_loss(train_losses=train_losses, val_losses=val_losses, 
@@ -332,6 +343,8 @@ def main():
     r2_test, mse_test, mae_test = evaluate(model=model, data_loader=test_dataloader, output_dim=Config.output_dim)
     print(f"R2 val: {r2_val} \t MSE val: {mse_val} \t MAE val: {mae_val}")
     print(f"R2 test: {r2_test} \t MSE test: {mse_test} \t MAE test: {mae_test}")
+    # R2 val: 0.9699230790138245 	 MSE val: 2.1697299480438232 	 MAE val: 1.0700738430023193
+    # R2 test: 0.9732441306114197 	 MSE test: 2.1425375938415527 	 MAE test: 1.0729864835739136
 
     # ------------------------------ plot results after inference with test set
     X_test, y_test = test_dataloader.dataset.X, test_dataloader.y
