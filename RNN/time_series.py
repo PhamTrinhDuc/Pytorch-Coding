@@ -279,7 +279,7 @@ def main():
     # model.show_model(batch_size=2, sequence_length=64)
 
     # ------------------ Prepare dataset
-    # data = pd.read_csv("./RNN/data/temp.csv")["Temperature (C)"]
+    # data = pd.read_csv("./data/temp.csv")["Temperature (C)"]
     # train_test_loader, X_test_tensor, y_test_tensor = preapare_data(data=data,
     #                                                            lag=Config.lag, 
     #                                                            ahead=Config.ahead, 
