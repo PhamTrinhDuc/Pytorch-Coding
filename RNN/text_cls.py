@@ -196,10 +196,6 @@ class ProcessingData:
         )
 
 
-def evaluate():
-    pass
-
-
 def training(model: RNNClsText,
              criterion: nn.MSELoss,
              optimizer: torch.optim.AdamW,
@@ -214,6 +210,7 @@ def training(model: RNNClsText,
         batch_train_loss = []
         batch_val_loss =[]
 
+        # training model with training set
         model.train()
         for inputs, labels in train_dataloader:
             optimizer.zero_grad()
@@ -229,6 +226,7 @@ def training(model: RNNClsText,
         epoch_train_loss = sum(batch_train_loss) / len(batch_train_loss)
         train_losses.append(epoch_train_loss)
 
+        # evaludate model with val set
         model.eval()
         with torch.no_grad():
             for inputs, labels in val_dataloader:
@@ -241,24 +239,94 @@ def training(model: RNNClsText,
 
     return train_losses, val_losses
 
+
+
+def evaluate(model: RNNClsText, 
+             data_loader: DataLoader,
+             binary: bool = True) -> tuple:
+    """
+    Evaluate model on test set 
+
+    Args:
+        model (RNNClsText): model need validation
+        data_loader (DataLoader): DataLoader data 
+        binary (bool): True if classify binary task , False if mutil labels.
+
+    Returns:
+        tuple: metrics (accuracy, f1, recall, precision, confusion_matrix, roc_auc).
+    """
+    model.eval()
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for X_batch, y_batch in data_loader:
+
+            X_batch = X_batch.to(DEVICE)
+            y_batch = y_batch.to(DEVICE)
+            
+            # predict 
+            logits = model(X_batch)
+            if binary:
+                preds = (logits.sigmoid() > 0.5).int()  # binary labels  
+            else:
+                preds = logits.argmax(dim=1)  # mutil labels 
+
+            all_preds.append(preds.cpu().numpy())
+            all_labels.append(y_batch.cpu().numpy())
+    
+    # Concat labels and predictions list 
+    all_preds = np.concatenate(all_preds)
+    all_labels = np.concatenate(all_labels)
+
+    # caculate metrics
+    acc_score = accuracy_score(y_true=all_labels, y_pred=all_preds)
+    f1 = f1_score(y_true=all_labels, y_pred=all_preds, average='binary' if binary else 'macro')
+    recall = recall_score(y_true=all_labels, y_pred=all_preds, average='binary' if binary else 'macro')
+    precision = precision_score(y_true=all_labels, y_pred=all_preds, average='binary' if binary else 'macro')
+    confusion_mt = confusion_matrix(y_true=all_labels, y_pred=all_preds)
+    
+    # ROC-AUC just apply for classify binary task 
+    if binary:
+        roc_auc = roc_auc_score(y_true=all_labels, y_score=logits.sigmoid().cpu().numpy())
+    else:
+        roc_auc = None  # don't use roc_auc 
+    
+    return acc_score, f1, recall, precision, confusion_mt, roc_auc
+
+
 def inference():
     pass
 
 
-def plot_loss(train_losses: list, val_losses: list, storage_results:str = None): 
+def plot_loss(train_losses: list, val_losses: list, storage_results: str = None): 
+    if not isinstance(train_losses, list) or not isinstance(val_losses, list):
+        raise ValueError("train_losses and val_losses must be list .")
+    if len(train_losses) != len(val_losses):
+        raise ValueError("train_losses and val_losses must be the same length .")
+    
     fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(12, 5))
-    ax[0].plot(train_losses)
+
+    ax[0].plot(train_losses, label="Train Loss", color='blue')
     ax[0].set_title("Training Loss")
     ax[0].set_xlabel("Epoch")
     ax[0].set_ylabel("Loss")
+    ax[0].grid(True)
+    ax[0].legend()
 
-    ax[1].plot(val_losses)
-    ax[1].set_title("Evaluate Loss")
+    ax[1].plot(val_losses, label="Validation Loss", color='orange')
+    ax[1].set_title("Validation Loss")
     ax[1].set_xlabel("Epoch")
     ax[1].set_ylabel("Loss")
+    ax[1].grid(True)
+    ax[1].legend()
 
     if storage_results:
-        plt.savefig(storage_results)
+        try:
+            plt.savefig(storage_results)
+        except Exception as e:
+            print(f"Error while store results: {e}")
+
     plt.show()
 
 
@@ -284,7 +352,6 @@ def load_model() -> RNNClsText:
     return model
 
 
-
 def main():
     processor = ProcessingData()
     # print(processor.vocab.get_stoi())
@@ -301,7 +368,7 @@ def main():
                        is_bidirectional=Config.is_bidirectional)
     
     torchinfo.summary(model=model)
-
+    
 
 if __name__ == "__main__":
     main()
