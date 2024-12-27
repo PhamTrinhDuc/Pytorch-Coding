@@ -32,30 +32,31 @@ class Config:
     hidden_dim: int = 64
     output_dim: int = 2
     num_layer: int = 2
-    is_bidirectional: bool = True
+    is_bidirectional: bool = False
     dropout_prob: float = 0.1
 
     batch_size: int = 64
-    num_epochs: int = 30
+    num_epochs: int = 3
     lr: float = 0.001
 
-    path_model: str = "./LSTM/checkpoint"
-    path_result_loss: str = "./LSTM/results/loss.png"
+    path_model: str = "./RNN/checkpoints/tex-cls.pth"
+    path_result_loss: str = "./RNN/results/loss-text-cls.png"
 
 
-class RNNClsText(nn.Module):
+class SentimentClassifier(nn.Module):
     def __init__(self, 
                  embed_dim: str, 
                  hidden_dim: str, 
                  vocab_size: int,
                  output_dim: int = 2, 
                  num_layer: int = 2,
+                 dropout_prob: float = 0.1,
                  is_bidirectional: bool = False):
         super().__init__()
         self.embed_model = nn.Embedding(num_embeddings=vocab_size,
                                         embedding_dim=embed_dim)
         
-        self.dropout = nn.Dropout(p=Config.dropout_prob)
+        self.dropout = nn.Dropout(p=dropout_prob)
         self.norm = nn.LayerNorm(normalized_shape=hidden_dim)
 
         self.rnn = nn.RNN(input_size=embed_dim, 
@@ -164,16 +165,16 @@ class ProcessingData:
         return vocab
 
     def _collate_batch(self, batch, 
-                       seq_length: int = 500) -> tuple[torch.Tensor, torch.Tensor]:
+                       seq_length: int = 500) :
         
         text_list, label_list = [], []
         for sample in batch:
             label_list.append(sample['label'])
 
-            text_processed = self.text_pipeline(sample['text'])[:seq_length]
+            text_processed = self.text_pipeline(sample['sentence'])[:seq_length]
             if len(text_processed) < seq_length:
-                pad_size = seq_length - len(text_processed)
-                text_processed = text_processed + [self.vocab['</s>']] + self.vocab['<pad>'] * pad_size
+                pad_size = seq_length - len(text_processed) - 1
+                text_processed = text_processed + [self.vocab['</s>']] + [self.vocab['<pad>']] * pad_size
             text_list.append(text_processed)
 
         input_ids = torch.tensor(text_list, dtype=torch.int64)
@@ -197,35 +198,41 @@ class ProcessingData:
         )
 
 
-def training(model: RNNClsText,
-             criterion: nn.MSELoss,
+def training(model: SentimentClassifier,
+             criterion: nn.CrossEntropyLoss,
              optimizer: torch.optim.AdamW,
              train_dataloader: DataLoader,
              val_dataloader: DataLoader,
              num_epochs: int):
     train_losses = []
-    val_losses = []
+    train_accuracies = []
+    test_losses = []
+    test_accuracies = []
 
     for num_epoch in range(num_epochs):
 
-        batch_train_loss = []
-        batch_val_loss =[]
-
+        running_train_loss, running_train_correct = 0.0, 0.0
+        running_val_loss, running_val_correct = 0.0, 0.0
+        total_train, total_val  = 0.0, 0.0
         # training model with training set
         model.train()
         for inputs, labels in train_dataloader:
             optimizer.zero_grad()
-            inputs = inputs.to(DEVICE), labels.to(DEVICE)
+            inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
 
             predictions = model(inputs)
+
             loss = criterion(predictions, labels)
-            batch_train_loss.append(loss.item())
+            running_train_loss += loss.item()
+
+            _, predicted = torch.max(predictions, dim=1)
+            total_train += labels.size(0)
+            running_train_correct += (predicted==labels).sum().item()
 
             loss.backward()
             optimizer.step()
-
-        epoch_train_loss = sum(batch_train_loss) / len(batch_train_loss)
-        train_losses.append(epoch_train_loss)
+        train_loss = running_train_loss / len(train_dataloader)
+        train_acc = 100 * running_train_correct / total_train
 
         # evaludate model with val set
         model.eval()
@@ -233,22 +240,34 @@ def training(model: RNNClsText,
             for inputs, labels in val_dataloader:
                 inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
                 predictions = model(inputs)
-                batch_val_loss.append(predictions.item())
-        
-        epoch_val_loss= sum(batch_val_loss) / len(batch_val_loss)
-        val_losses.append(epoch_val_loss)
+                
+                loss = criterion(predictions, labels)
+                running_val_loss += loss.item()
 
-    return train_losses, val_losses
+                _, predicted = torch.max(predictions, 1)
+                running_val_correct += (predicted == labels).sum().item()
+                total_val += labels.size(0)
+
+        val_acc = running_val_correct * 100 / total_val
+        val_loss = running_val_loss / len(val_dataloader)
+
+        train_losses.append(train_loss)
+        train_accuracies.append(train_acc)
+        test_losses.append(val_loss)
+        test_accuracies.append(val_acc)
+
+        print(f"Epoch [{num_epoch + 1}/{num_epochs}]\t Train Acc: {train_acc:.4f}\t Test Acc: {val_acc:.4f}\t Train Loss: {train_loss:.4f}\t Test Loss: {val_loss:.4f}")
+    return train_accuracies, test_accuracies, train_losses, test_losses
 
 
-def evaluate(model: RNNClsText, 
+def evaluate(model: SentimentClassifier, 
              data_loader: DataLoader,
              binary: bool = True) -> tuple:
     """
     Evaluate model on test set 
 
     Args:
-        model (RNNClsText): model need validation
+        model (SentimentClassifier): model need validation
         data_loader (DataLoader): DataLoader data 
         binary (bool): True if classify binary task , False if mutil labels.
 
@@ -274,7 +293,7 @@ def evaluate(model: RNNClsText,
 
             all_preds.append(preds.cpu().numpy())
             all_labels.append(y_batch.cpu().numpy())
-    
+    print(all_labels)
     # Concat labels and predictions list 
     all_preds = np.concatenate(all_preds)
     all_labels = np.concatenate(all_labels)
@@ -350,13 +369,13 @@ def plot_loss(train_losses: list, val_losses: list, storage_results: str = None)
     plt.show()
 
 
-def save_model(model: RNNClsText) -> None:
+def save_model(model: SentimentClassifier) -> None:
     torch.save(obj=model.state_dict(), 
                f=Config.path_model)
 
 
-def load_model() -> RNNClsText:
-    model = RNNClsText(embed_dim=Config.embedding_dim, 
+def load_model() -> SentimentClassifier:
+    model = SentimentClassifier(embed_dim=Config.embedding_dim, 
                        hidden_dim=Config.hidden_dim,
                        output_dim=Config.output_dim,
                        vocab_size=Config.vocab_size,
@@ -376,15 +395,41 @@ def main():
     train_dataloader, val_dataloader, test_dataloader = processor.create_dataloader()
 
     # ---------------- init model
-    model = RNNClsText(embed_dim=Config.embedding_dim, 
-                       hidden_dim=Config.hidden_dim,
-                       output_dim=Config.output_dim,
-                       vocab_size=Config.vocab_size,
-                       num_layer=Config.num_layer,
-                       is_bidirectional=Config.is_bidirectional)
+    # model = SentimentClassifier(embed_dim=Config.embedding_dim, 
+    #                    hidden_dim=Config.hidden_dim,
+    #                    output_dim=Config.output_dim,
+    #                    vocab_size=Config.vocab_size,
+    #                    num_layer=Config.num_layer,
+    #                    is_bidirectional=Config.is_bidirectional)
+
+    # random_tensor = torch.randint(low=0, 
+    #                               high=Config.vocab_size, 
+    #                               size=(64, Config.sequence_length), 
+    #                               dtype=torch.long)
+    # results = model(random_tensor)
+    # print(results.shape)
+
+    # ----------------- traning model
+    # criterion = nn.CrossEntropyLoss()
+    # optimizer = torch.optim.AdamW(params=model.parameters(), lr=Config.lr)
+    # train_accuracies, test_accuracies, train_losses, test_losses = training(model=model, 
+    #          criterion=criterion, 
+    #          optimizer=optimizer, 
+    #          train_dataloader=train_dataloader, 
+    #          val_dataloader=val_dataloader,
+    #          num_epochs=Config.num_epochs)
+    # ------------------ save weight model
+    # save_model(model=model)
+
+    # # ------------------ plot results
+    # plot_loss(train_losses=train_losses, val_losses=test_losses, 
+    #           storage_results=Config.path_result_loss)
     
-    torchinfo.summary(model=model)
+    # ------------------ evaluate 
+    model = load_model()
+    evaluate(model=model, data_loader=test_dataloader, binary=True)
 
 
 if __name__ == "__main__":
-    main()
+    df = pd.read_csv('data/cls_text/train.csv')
+    print(df['label'].value_counts())
