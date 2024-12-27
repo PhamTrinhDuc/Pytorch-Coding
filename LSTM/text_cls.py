@@ -36,7 +36,7 @@ class Config:
     dropout_prob: float = 0.1
 
     batch_size: int = 64
-    num_epochs: int = 30
+    num_epochs: int = 25
     lr: float = 0.001
 
     path_model: str = "./LSTM/checkpoints/lstm_tex_cls.pth"
@@ -429,57 +429,57 @@ def main():
     train_dataloader, val_dataloader, test_dataloader = processor.create_dataloader()
 
     # ---------------- init model
-    # model = SentimentClassifier(embed_dim=Config.embedding_dim, 
-    #                    hidden_dim=Config.hidden_dim,
-    #                    output_dim=Config.output_dim,
-    #                    vocab_size=Config.vocab_size,
-    #                    num_layer=Config.num_layer,
-    #                    is_bidirectional=Config.is_bidirectional)
+    model = SentimentClassifier(embed_dim=Config.embedding_dim, 
+                       hidden_dim=Config.hidden_dim,
+                       output_dim=Config.output_dim,
+                       vocab_size=Config.vocab_size,
+                       num_layer=Config.num_layer,
+                       is_bidirectional=Config.is_bidirectional)
 
-    # random_tensor = torch.randint(low=0, 
-    #                               high=Config.vocab_size, 
-    #                               size=(64, Config.sequence_length), 
-    #                               dtype=torch.long)
-    # results = model(random_tensor)
-    # print(results.shape)
+    random_tensor = torch.randint(low=0, 
+                                  high=Config.vocab_size, 
+                                  size=(64, Config.sequence_length), 
+                                  dtype=torch.long)
+    results = model(random_tensor)
+    print(results.shape)
 
     # ----------------- traning model
-    # criterion = nn.CrossEntropyLoss()
-    # optimizer = torch.optim.AdamW(params=model.parameters(), lr=Config.lr)
-    # train_accuracies, test_accuracies, train_losses, test_losses = training(model=model, 
-    #          criterion=criterion, 
-    #          optimizer=optimizer, 
-    #          train_dataloader=train_dataloader, 
-    #          val_dataloader=val_dataloader,
-    #          num_epochs=Config.num_epochs)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=Config.lr)
+    train_accuracies, test_accuracies, train_losses, test_losses = training(model=model, 
+             criterion=criterion, 
+             optimizer=optimizer, 
+             train_dataloader=train_dataloader, 
+             val_dataloader=val_dataloader,
+             num_epochs=Config.num_epochs)
     # ------------------ save weight model
-    # save_model(model=model)
+    save_model(model=model)
 
     # ------------------ plot results
-    # plot_results(mode="Loss", 
-    #           train_results=train_losses, 
-    #           val_results=test_losses, 
-    #           is_storage_results=True)
-    # plot_results(mode="Accuracy", 
-    #           train_results=train_accuracies, 
-    #           val_results=test_accuracies, 
-    #           is_storage_results=True)
+    plot_results(mode="Loss", 
+              train_results=train_losses, 
+              val_results=test_losses, 
+              is_storage_results=True)
+    plot_results(mode="Accuracy", 
+              train_results=train_accuracies, 
+              val_results=test_accuracies, 
+              is_storage_results=True)
     
     # ------------------ evaluate 
     # model = load_model()
-    # metrics = evaluate(
-    #     model=model,
-    #     data_loader=test_dataloader,
-    #     device='cpu',
-    #     task_type='binary'
-    # )
+    metrics = evaluate(
+        model=model,
+        data_loader=test_dataloader,
+        device='cpu',
+        task_type='binary'
+    )
 
     # In kết quả
-    # print(f"Accuracy: {metrics['accuracy']:.4f}")
-    # print(f"F1 Score: {metrics['f1']:.4f}")
-    # print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
-    # print("\nConfusion Matrix:")
-    # print(metrics['confusion_matrix'])
+    print(f"Accuracy: {metrics['accuracy']:.4f}")
+    print(f"F1 Score: {metrics['f1']:.4f}")
+    print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
+    print("\nConfusion Matrix:")
+    print(metrics['confusion_matrix'])
 
     res = inference(text="Tôi không thích quán ăn này, nó khá bẩn và phục vụ kém")
     print(res)
