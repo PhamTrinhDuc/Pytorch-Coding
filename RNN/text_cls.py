@@ -32,7 +32,7 @@ class Config:
     hidden_dim: int = 64
     output_dim: int = 2
     num_layer: int = 2
-    is_bidirectional: bool = False
+    is_bidirectional: bool = True
     dropout_prob: float = 0.1
 
     batch_size: int = 64
@@ -40,7 +40,7 @@ class Config:
     lr: float = 0.001
 
     path_model: str = "./RNN/checkpoints/tex-cls.pth"
-    path_result_loss: str = "./RNN/results/loss-text-cls.png"
+    path_result: str = "./RNN/results/text_cls_{mode}.png"
 
 
 class SentimentClassifier(nn.Module):
@@ -338,25 +338,28 @@ def inference(text: str):
         return predicted_label
 
 
-def plot_loss(train_losses: list, val_losses: list, storage_results: str = None): 
-    if not isinstance(train_losses, list) or not isinstance(val_losses, list):
-        raise ValueError("train_losses and val_losses must be list .")
-    if len(train_losses) != len(val_losses):
-        raise ValueError("train_losses and val_losses must be the same length .")
+def plot_loss(mode: str, 
+              train_results: list, 
+              val_results: list, 
+              is_storage_results: bool = True,): 
+    if not isinstance(train_results, list) or not isinstance(val_results, list):
+        raise ValueError("train_results and val_results must be list .")
+    if len(train_results) != len(val_results):
+        raise ValueError("train_results and val_results must be the same length .")
     
     fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(12, 5))
-
-    ax[0].plot(train_losses, label="Train Loss", color='blue')
-    ax[0].set_title("Training Loss")
+    storage_results = Config.path_result.format(mode=mode)
+    ax[0].plot(train_results, label=f"Train {mode}", color='blue')
+    ax[0].set_title(f"Training {mode}")
     ax[0].set_xlabel("Epoch")
-    ax[0].set_ylabel("Loss")
+    ax[0].set_ylabel("{mode}")
     ax[0].grid(True)
     ax[0].legend()
 
-    ax[1].plot(val_losses, label="Validation Loss", color='orange')
-    ax[1].set_title("Validation Loss")
+    ax[1].plot(val_results, label=f"Validation {mode}", color='orange')
+    ax[1].set_title(f"Validation {mode}")
     ax[1].set_xlabel("Epoch")
-    ax[1].set_ylabel("Loss")
+    ax[1].set_ylabel(f"{mode}")
     ax[1].grid(True)
     ax[1].legend()
 
@@ -395,12 +398,12 @@ def main():
     train_dataloader, val_dataloader, test_dataloader = processor.create_dataloader()
 
     # ---------------- init model
-    # model = SentimentClassifier(embed_dim=Config.embedding_dim, 
-    #                    hidden_dim=Config.hidden_dim,
-    #                    output_dim=Config.output_dim,
-    #                    vocab_size=Config.vocab_size,
-    #                    num_layer=Config.num_layer,
-    #                    is_bidirectional=Config.is_bidirectional)
+    model = SentimentClassifier(embed_dim=Config.embedding_dim, 
+                       hidden_dim=Config.hidden_dim,
+                       output_dim=Config.output_dim,
+                       vocab_size=Config.vocab_size,
+                       num_layer=Config.num_layer,
+                       is_bidirectional=Config.is_bidirectional)
 
     # random_tensor = torch.randint(low=0, 
     #                               high=Config.vocab_size, 
@@ -410,26 +413,30 @@ def main():
     # print(results.shape)
 
     # ----------------- traning model
-    # criterion = nn.CrossEntropyLoss()
-    # optimizer = torch.optim.AdamW(params=model.parameters(), lr=Config.lr)
-    # train_accuracies, test_accuracies, train_losses, test_losses = training(model=model, 
-    #          criterion=criterion, 
-    #          optimizer=optimizer, 
-    #          train_dataloader=train_dataloader, 
-    #          val_dataloader=val_dataloader,
-    #          num_epochs=Config.num_epochs)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=Config.lr)
+    train_accuracies, test_accuracies, train_losses, test_losses = training(model=model, 
+             criterion=criterion, 
+             optimizer=optimizer, 
+             train_dataloader=train_dataloader, 
+             val_dataloader=val_dataloader,
+             num_epochs=Config.num_epochs)
     # ------------------ save weight model
-    # save_model(model=model)
+    save_model(model=model)
 
-    # # ------------------ plot results
-    # plot_loss(train_losses=train_losses, val_losses=test_losses, 
-    #           storage_results=Config.path_result_loss)
+    # ------------------ plot results
+    plot_loss(mode="Loss", 
+              train_results=train_losses, 
+              val_results=test_losses, 
+              storage_results=True)
+    plot_loss(mode="Accuracy", 
+              train_results=train_accuracies, 
+              val_results=test_accuracies, 
+              storage_results=True)
     
     # ------------------ evaluate 
     model = load_model()
     evaluate(model=model, data_loader=test_dataloader, binary=True)
 
-
 if __name__ == "__main__":
-    df = pd.read_csv('data/cls_text/train.csv')
-    print(df['label'].value_counts())
+    main()
