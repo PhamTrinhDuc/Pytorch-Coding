@@ -429,12 +429,13 @@ def main():
     train_dataloader, val_dataloader, test_dataloader = processor.create_dataloader()
 
     # ---------------- init model
-    model = SentimentClassifier(embed_dim=Config.embedding_dim, 
-                       hidden_dim=Config.hidden_dim,
-                       output_dim=Config.output_dim,
-                       vocab_size=Config.vocab_size,
-                       num_layer=Config.num_layer,
-                       is_bidirectional=Config.is_bidirectional)
+    model = SentimentClassifier(
+        embed_dim=Config.embedding_dim, 
+        hidden_dim=Config.hidden_dim,
+        output_dim=Config.output_dim,
+        vocab_size=Config.vocab_size,
+        num_layer=Config.num_layer,
+        is_bidirectional=Config.is_bidirectional)
 
     # random_tensor = torch.randint(low=0, 
     #                               high=Config.vocab_size, 
