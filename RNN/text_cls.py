@@ -36,11 +36,11 @@ class Config:
     dropout_prob: float = 0.1
 
     batch_size: int = 64
-    num_epochs: int = 3
+    num_epochs: int = 30
     lr: float = 0.001
 
-    path_model: str = "./RNN/checkpoints/tex-cls.pth"
-    path_result: str = "./RNN/results/text_cls_{mode}.png"
+    path_model: str = "./RNN/checkpoints/checkpoint_tex_cls.pth"
+    path_result: str = "./RNN/results/rnn_text_cls_{mode}.png"
 
 
 class SentimentClassifier(nn.Module):
@@ -198,7 +198,7 @@ class ProcessingData:
         )
 
 
-def training(model: SentimentClassifier,
+def training(model: nn.Module,
              criterion: nn.CrossEntropyLoss,
              optimizer: torch.optim.AdamW,
              train_dataloader: DataLoader,
@@ -219,16 +219,20 @@ def training(model: SentimentClassifier,
         for inputs, labels in train_dataloader:
             optimizer.zero_grad()
             inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
-
+            # Forward 
             predictions = model(inputs)
 
+            # caculate loss behind predictions and labels
             loss = criterion(predictions, labels)
             running_train_loss += loss.item()
 
+            # caculate accuracy
             _, predicted = torch.max(predictions, dim=1)
             total_train += labels.size(0)
             running_train_correct += (predicted==labels).sum().item()
 
+
+            # backpropagation
             loss.backward()
             optimizer.step()
         train_loss = running_train_loss / len(train_dataloader)
@@ -239,11 +243,13 @@ def training(model: SentimentClassifier,
         with torch.no_grad():
             for inputs, labels in val_dataloader:
                 inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
+                # Forward
                 predictions = model(inputs)
-                
+                # Caculate loss
                 loss = criterion(predictions, labels)
                 running_val_loss += loss.item()
 
+                # Caculate accuracy
                 _, predicted = torch.max(predictions, 1)
                 running_val_correct += (predicted == labels).sum().item()
                 total_val += labels.size(0)
@@ -260,58 +266,83 @@ def training(model: SentimentClassifier,
     return train_accuracies, test_accuracies, train_losses, test_losses
 
 
-def evaluate(model: SentimentClassifier, 
-             data_loader: DataLoader,
-             binary: bool = True) -> tuple:
+def evaluate(model: nn.Module,
+            data_loader: DataLoader,
+            device: str = 'cuda',
+            task_type: str = 'binary') -> dict:
     """
-    Evaluate model on test set 
-
+    Evaluate model performance with multiple metrics
+    
     Args:
-        model (SentimentClassifier): model need validation
-        data_loader (DataLoader): DataLoader data 
-        binary (bool): True if classify binary task , False if mutil labels.
-
+        model: PyTorch model
+        data_loader: PyTorch DataLoader containing validation/test data
+        device: Device to run evaluation on ('cuda' or 'cpu')
+        task_type: Type of classification task ('binary' or 'multi')
+    
     Returns:
-        tuple: metrics (accuracy, f1, recall, precision, confusion_matrix, roc_auc).
+        Dictionary containing evaluation metrics
     """
+    # Validate arguments
+    if task_type not in ['binary', 'multi']:
+        raise ValueError("task_type must be either 'binary' or 'multi'")
+
     model.eval()
     all_preds = []
     all_labels = []
+    all_probs = []
 
     with torch.no_grad():
-        for X_batch, y_batch in data_loader:
+        for batch in data_loader:
+            inputs, labels = batch
+            inputs = inputs.to(device)
+            labels = labels.to(device)
 
-            X_batch = X_batch.to(DEVICE)
-            y_batch = y_batch.to(DEVICE)
-            
-            # predict 
-            logits = model(X_batch)
-            if binary:
-                preds = (logits.sigmoid() > 0.5).int()  # binary labels  
+            # Forward pass
+            logits = model(inputs)
+
+            # Get predictions and probabilities
+            if task_type == 'binary':
+                probs = logits[:, 1].sigmoid()
+                preds = (probs > 0.5).int()
+                all_probs.append(probs.cpu().numpy())
             else:
-                preds = logits.argmax(dim=1)  # mutil labels 
+                preds = logits.argmax(dim=1)
 
+            # Store batch results
             all_preds.append(preds.cpu().numpy())
-            all_labels.append(y_batch.cpu().numpy())
-    print(all_labels)
-    # Concat labels and predictions list 
-    all_preds = np.concatenate(all_preds)
-    all_labels = np.concatenate(all_labels)
+            all_labels.append(labels.cpu().numpy())
 
-    # caculate metrics
-    acc_score = accuracy_score(y_true=all_labels, y_pred=all_preds)
-    f1 = f1_score(y_true=all_labels, y_pred=all_preds, average='binary' if binary else 'macro')
-    recall = recall_score(y_true=all_labels, y_pred=all_preds, average='binary' if binary else 'macro')
-    precision = precision_score(y_true=all_labels, y_pred=all_preds, average='binary' if binary else 'macro')
-    confusion_mt = confusion_matrix(y_true=all_labels, y_pred=all_preds)
-    
-    # ROC-AUC just apply for classify binary task 
-    if binary:
-        roc_auc = roc_auc_score(y_true=all_labels, y_score=logits.sigmoid().cpu().numpy())
-    else:
-        roc_auc = None  # don't use roc_auc 
-    
-    return acc_score, f1, recall, precision, confusion_mt, roc_auc
+    # Concatenate all batches
+    all_labels = np.concatenate(all_labels)
+    all_preds = np.concatenate(all_preds)
+
+    # Calculate metrics
+    metrics = {
+        'accuracy': accuracy_score(all_labels, all_preds),
+        'precision': precision_score(
+            all_labels, 
+            all_preds,
+            average='binary' if task_type == 'binary' else 'macro'
+        ),
+        'recall': recall_score(
+            all_labels, 
+            all_preds, 
+            average='binary' if task_type == 'binary' else 'macro'
+        ),
+        'f1': f1_score(
+            all_labels, 
+            all_preds,
+            average='binary' if task_type == 'binary' else 'macro'
+        ),
+        'confusion_matrix': confusion_matrix(all_labels, all_preds)
+    }
+
+    # Add ROC-AUC for binary classification
+    if task_type == 'binary':
+        all_probs = np.concatenate(all_probs)
+        metrics['roc_auc'] = roc_auc_score(all_labels, all_probs)
+
+    return metrics
 
 
 def inference(text: str):
@@ -327,7 +358,7 @@ def inference(text: str):
     text_processed = text_pipeline(text)[:Config.sequence_length]
     if len(text_processed) < Config.sequence_length:
         pad_size = Config.sequence_length - len(text_processed)
-        text_processed = text_processed + [vocab['</s>']] + vocab['<pad>'] * pad_size
+        text_processed = text_processed + [vocab['</s>']] + [vocab['<pad>']] * pad_size
     text_list.append(text_processed)
     input_ids = torch.tensor(text_list, dtype=torch.int64)
 
@@ -338,7 +369,7 @@ def inference(text: str):
         return predicted_label
 
 
-def plot_loss(mode: str, 
+def plot_results(mode: str, 
               train_results: list, 
               val_results: list, 
               is_storage_results: bool = True,): 
@@ -372,7 +403,7 @@ def plot_loss(mode: str,
     plt.show()
 
 
-def save_model(model: SentimentClassifier) -> None:
+def save_model(model: nn.Module) -> None:
     torch.save(obj=model.state_dict(), 
                f=Config.path_model)
 
@@ -425,18 +456,34 @@ def main():
     save_model(model=model)
 
     # ------------------ plot results
-    plot_loss(mode="Loss", 
+    plot_results(mode="Loss", 
               train_results=train_losses, 
               val_results=test_losses, 
-              storage_results=True)
-    plot_loss(mode="Accuracy", 
+              is_storage_results=True)
+    plot_results(mode="Accuracy", 
               train_results=train_accuracies, 
               val_results=test_accuracies, 
-              storage_results=True)
+              is_storage_results=True)
     
     # ------------------ evaluate 
     model = load_model()
-    evaluate(model=model, data_loader=test_dataloader, binary=True)
+    metrics = evaluate(
+        model=model,
+        data_loader=test_dataloader,
+        device='cpu',
+        task_type='binary'
+    )
+
+    # In kết quả
+    print(f"Accuracy: {metrics['accuracy']:.4f}")
+    print(f"F1 Score: {metrics['f1']:.4f}")
+    print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
+    print("\nConfusion Matrix:")
+    print(metrics['confusion_matrix'])
+
+    res = inference(text="Tôi thích quán ăn này")
+    print(res)
+
 
 if __name__ == "__main__":
     main()
