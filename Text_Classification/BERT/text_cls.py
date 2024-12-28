@@ -16,8 +16,9 @@ class Config:
     batch_size: int = 128
     lr: float = 2e-5
     per_device_batch_size: int = 128
-    epochs: int = 10
+    epochs: int = 1
     path_model: str = "../BERT/checkpoint"
+    hf_model: str = "DucPTIT/Bert-Classifier-Text"
 
 class TextClassifierBERT:
     def __init__(self, train_dataset, val_dataset):
@@ -28,7 +29,7 @@ class TextClassifierBERT:
         self.model = self._init_model()
         self.trainer = self.init_trainer()
 
-    def _init_model():
+    def _init_model(self):
         config = AutoConfig.from_pretrained(
             pretrained_model_name_or_path=Config.MODEL_NAME,
             num_labels = Config.num_classes,
@@ -42,7 +43,7 @@ class TextClassifierBERT:
         # print(model)
         return model
     
-    def compute_metrics(eval_pred: tuple[np.ndarray, np.ndarray]) -> dict:
+    def compute_metrics(self, eval_pred: tuple[np.ndarray, np.ndarray]) -> dict:
         """
         Calculate evaluation metrics for text classification model.
         
@@ -65,13 +66,13 @@ class TextClassifierBERT:
         """
         
         accuracy_metric = evaluate.load("accuracy")
-        f1_metric = evaluate.load("f1")
+        # f1_metric = evaluate.load("f1")
 
         predictions, labels = eval_pred
         position_pred = np.argmax(predictions, axis=1)
         results = {
             **accuracy_metric.compute(predictions=position_pred, references=labels),
-            **f1_metric.compute(predictions=position_pred, references=labels, average='weighted')
+            # **f1_metric.compute(predictions=position_pred, references=labels, average='weighted')
         }
         return results
 
@@ -82,15 +83,16 @@ class TextClassifierBERT:
             per_device_train_batch_size=Config.per_device_batch_size,
             learning_rate=Config.lr,
             num_train_epochs=Config.epochs,
-            evaluation_strategy="epochs", # eval after each epoch,
+            report_to=None, # if wandb
+            eval_strategy="epoch", # eval after each epoch,
             save_strategy="epoch", # save model each epoch,
             load_best_model_at_end=True, # load best model 
-            metric_for_best_model="f1", # Save the best model based on a specific metric
-            greater_is_better=True # Select greater than as True if the number is higher the better
+            # metric_for_best_model="f1", # Save the best model based on a specific metric
+            # greater_is_better=True # Select greater than as True if the number is higher the better
         )
 
         trainer = Trainer(
-            model=Config.MODEL_NAME,
+            model=self.model,
             args=args_train,
             train_dataset=self.train_dataset,
             eval_dataset=self.val_dataset,
@@ -123,6 +125,7 @@ def init_tokenizer(prrint_info: bool = False):
             print("Key results (dict): ", results.keys())
             print("Shape two senteces tokenized: ", np.array(results['input_ids']).shape)
         return tokenizer
+
 
 def prepare_data(df_train: pd.DataFrame, 
                  df_val: pd.DataFrame, 
@@ -172,10 +175,10 @@ def prepare_data(df_train: pd.DataFrame,
     def _process_func(examples: list):
         tokenizer = init_tokenizer()
         results = tokenizer(
-            examples['sentences'],
+            examples['sentence'],
             padding="max_length",
             max_length = Config.max_seq_len,
-            truncate = True
+            truncation = True
         ) 
         results['labels'] = examples['label']
         return results
@@ -209,26 +212,26 @@ def prepare_data(df_train: pd.DataFrame,
     return preprocessed_data
 
 
-def inference(texts: list[str], path_model: str = None,):
+def inference(text: str):
+    model_name=Config.hf_model
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    inputs = tokenizer(text, return_tensors="pt")
+
+    id2label = {1: "POSITIVE", 0: "NEGATIVE"}
+    label2id = {"POSITIVE": 1, "NEGATIVE": 0}
     model = AutoModelForSequenceClassification.from_pretrained(
-        pretrained_model_name_or_path=path_model or Config.path_model,
+        model_name,
+        num_labels=2,
+        id2label=id2label,
+        label2id=label2id
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        pretrained_model_name_or_path=path_model or Config.path_model,
-        use_fast=True
-    )
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
+    outputs = model.forward(**inputs)
 
-    encoding = tokenizer(text=texts, 
-                         return_tensors=True,
-                         truncation=True,
-                         padding="max_length",
-                         max_length=Config.max_seq_len,)
-
-    # forward pass 
-    output = model(**encoding)
-    predictions = output.logits.argmax(-1)
-    return predictions
+    predicted_label_index = outputs.logits.argmax(-1).item()
+    predicted_label = id2label[predicted_label_index]
+    print(f"The predicted label for the text is: {predicted_label}")
 
 def main():
 
@@ -247,8 +250,17 @@ def main():
     )
     # training 
     classifier.trainer.train()
-    classifier.trainer.push_to_hub()
-    classifier.trainer.predict(test_dataset=preprocessed_data['test'])
+
+    # save model and tokenizer to hf
+    classifier.model.push_to_hub(Config.hf_model)
+    classifier.tokenizer.push_to_hub(Config.hf_model)
+    
+    
+    # evaluate with test dataset 
+    results = classifier.trainer.evaluate(test_dataset=preprocessed_data['test'])
+    print("Results after evaluate: ")
+    print(results)    
+
 
 if __name__ == "__main__":
     main()
