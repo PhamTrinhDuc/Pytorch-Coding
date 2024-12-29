@@ -595,7 +595,7 @@ def main():
                 train_accs=metrics['train_accuracies'], 
                 val_accs=metrics['valid_accuracies'], 
                 train_losses=metrics['train_losses'],
-                val_losses=metrics['val_losses'], 
+                val_losses=metrics['valid_losses'], 
                 path_storage_result=Config.path_result)
     
     # ---------------------- evaluate with metrics 
@@ -606,14 +606,14 @@ def main():
         task_type='binary'
     )
 
-    # In kết quả
+    # ----------------------- Show results 
     print(f"Accuracy: {metrics['accuracy']:.4f}")
     print(f"F1 Score: {metrics['f1']:.4f}")
     print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
     print("\nConfusion Matrix:")
     print(metrics['confusion_matrix'])
     
-    # ---------------------- inference
+    # ---------------------- Inference
     results = inference(text="Quán ăn khá sạch sẽ, tôi sẽ quay lại vào lần sau",
                         model=classifier, path_model=Config.path_model, device=DEVICE)
     print(results)
