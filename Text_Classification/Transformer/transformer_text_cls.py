@@ -35,7 +35,7 @@ class Config:
     dropout_prob: float = 0.1
  
     batch_size: int = 32
-    num_epochs: int = 1
+    num_epochs: int = 25
     lr: float = 0.001
 
     path_model: str = "./Text_Classification/Transformer/checkpoint/transformer_tex_cls.pth"
