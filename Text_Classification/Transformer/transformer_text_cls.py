@@ -35,11 +35,11 @@ class Config:
     dropout_prob: float = 0.1
  
     batch_size: int = 32
-    num_epochs: int = 25
+    num_epochs: int = 1
     lr: float = 0.001
 
-    path_model: str = "../Transformer/checkpoint/transformer_tex_cls.pth"
-    path_result: str = "../Transformer/results/transformer_text_cls_{mode}.png"
+    path_model: str = "./Text_Classification/Transformer/checkpoint/transformer_tex_cls.pth"
+    path_result: str = "./Text_Classification/Transformer/results/transformer_text_cls.png"
 
 
 class TokenAndPositionEmbedding(nn.Module):
@@ -179,14 +179,17 @@ class TransformerClassifier(nn.Module):
     
 
 class ProcessingData:
+    df_train = pd.read_csv("data/cls_text/train.csv")
+    df_val = pd.read_csv("data/cls_text/val.csv")
+    df_test = pd.read_csv("data/cls_text/test.csv")
 
-    def __init__(self, df_train: pd.DataFrame, df_val: pd.DataFrame, df_test: pd.DataFrame):
-        self.train_data, self.val_data, self.test_data = self._prepare_data(df_train, df_val, df_test)
+    def __init__(self):
+        self.train_data, self.val_data, self.test_data = self._prepare_data()
         self.tokenizer = get_tokenizer("basic_english")
         self.vocab = self._build_vocab()
         self.text_pipeline = lambda x: self.vocab(self.tokenizer(x))
 
-    def _prepare_data(self, df_train, df_val, df_test) -> tuple[Dataset, Dataset, Dataset]:
+    def _prepare_data(self) -> tuple[Dataset, Dataset, Dataset]:
         
         def preprocess_text(text) -> str:
             # remove URLs https://www.
@@ -229,14 +232,14 @@ class ProcessingData:
             text = text.lower()
             return text
 
-        df_train['sentence'].apply(preprocess_text)
-        df_val['sentence'].apply(preprocess_text)
-        df_test['sentence'].apply(preprocess_text)
+        self.df_train['sentence'].apply(preprocess_text)
+        self.df_val['sentence'].apply(preprocess_text)
+        self.df_test['sentence'].apply(preprocess_text)
         
         return (
-            Dataset.from_pandas(df_train),
-            Dataset.from_pandas(df_val),  
-            Dataset.from_pandas(df_test)
+            Dataset.from_pandas(self.df_train),
+            Dataset.from_pandas(self.df_val),  
+            Dataset.from_pandas(self.df_test)
         )
 
     def _build_vocab(self):
@@ -256,7 +259,7 @@ class ProcessingData:
 
 
     def _collate_batch(self, batch, 
-                       seq_length: int = 500) :
+                       seq_length: int = Config.sequence_length) :
         
         text_list, label_list = [], []
         for sample in batch:
@@ -368,7 +371,7 @@ def fit(model: nn.Module,
     eval_accs, eval_losses = [], []
     best_loss_eval = 100
     times = []
-    for epoch in range(1, num_epochs):
+    for epoch in range(1, num_epochs+1):
         epoch_start_time = time.time()
 
         # trainning
@@ -409,8 +412,112 @@ def fit(model: nn.Module,
     return model, metrics
 
 
-def inference():
-    pass
+def evaluate(model: nn.Module,
+            data_loader: DataLoader,
+            device: str = 'cuda',
+            task_type: str = 'binary') -> dict:
+    """
+    Evaluate model performance with multiple metrics
+    
+    Args:
+        model: PyTorch model
+        data_loader: PyTorch DataLoader containing validation/test data
+        device: Device to run evaluation on ('cuda' or 'cpu')
+        task_type: Type of classification task ('binary' or 'multi')
+    
+    Returns:
+        Dictionary containing evaluation metrics
+    """
+    # Validate arguments
+    if task_type not in ['binary', 'multi']:
+        raise ValueError("task_type must be either 'binary' or 'multi'")
+
+    model.eval()
+    all_preds = []
+    all_labels = []
+    all_probs = []
+
+    with torch.no_grad():
+        for batch in data_loader:
+            inputs, labels = batch
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            # Forward pass
+            logits = model(inputs)
+
+            # Get predictions and probabilities
+            if task_type == 'binary':
+                probs = logits[:, 1].sigmoid()
+                preds = (probs > 0.5).int()
+                all_probs.append(probs.cpu().numpy())
+            else:
+                preds = logits.argmax(dim=1)
+
+            # Store batch results
+            all_preds.append(preds.cpu().numpy())
+            all_labels.append(labels.cpu().numpy())
+
+    # Concatenate all batches
+    all_labels = np.concatenate(all_labels)
+    all_preds = np.concatenate(all_preds)
+
+    # Calculate metrics
+    metrics = {
+        'accuracy': accuracy_score(all_labels, all_preds),
+        'precision': precision_score(
+            all_labels, 
+            all_preds,
+            average='binary' if task_type == 'binary' else 'macro'
+        ),
+        'recall': recall_score(
+            all_labels, 
+            all_preds, 
+            average='binary' if task_type == 'binary' else 'macro'
+        ),
+        'f1': f1_score(
+            all_labels, 
+            all_preds,
+            average='binary' if task_type == 'binary' else 'macro'
+        ),
+        'confusion_matrix': confusion_matrix(all_labels, all_preds)
+    }
+
+    # Add ROC-AUC for binary classification
+    if task_type == 'binary':
+        all_probs = np.concatenate(all_probs)
+        metrics['roc_auc'] = roc_auc_score(all_labels, all_probs)
+
+    return metrics
+
+
+def inference(
+        text: str,
+        model: nn.Module, 
+        path_model: str, 
+        device):
+    model.load_state_dict(torch.load(f=path_model, 
+                                map_location=torch.device(device=device)))
+    
+    processor = ProcessingData()
+    vocab = processor.vocab
+    text_pipelie = processor.text_pipeline
+
+    text_list = []
+    text_processed = text_pipelie(text)[:Config.sequence_length]
+    if len(text_processed) < Config.sequence_length:
+        pad_size = Config.sequence_length - len(text_processed)
+        text_processed = text_processed + [vocab['</s>']] + [vocab['<pad>']] * pad_size
+    text_list.append(text_processed)
+    input_ids = torch.tensor(text_list, dtype=torch.int64)
+
+    with torch.no_grad():
+        logits = model(input_ids)
+        print(logits.shape)
+
+        probabilities = softmax(logits, dim=-1)  
+        predicted_label = torch.argmax(probabilities, dim=-1).item() 
+        return predicted_label
 
 
 def plot_result(num_epochs: int, 
@@ -473,10 +580,7 @@ def main():
 
 
     # ---------------------- Get data
-    df_train = pd.read_csv("data/cls_text/train.csv")
-    df_val = pd.read_csv("data/cls_text/val.csv")
-    df_test = pd.read_csv("data/cls_text/test.csv")
-    processor = ProcessingData(df_train, df_val, df_test)
+    processor = ProcessingData()
     train_loader, val_loader, test_loader = processor.create_dataloader()
 
     # ---------------------- training
@@ -493,11 +597,25 @@ def main():
                 train_losses=metrics['train_losses'],
                 val_losses=metrics['val_losses'], 
                 path_storage_result=Config.path_result)
+    
     # ---------------------- evaluate with metrics 
+    metrics = evaluate(
+        model=model,
+        data_loader=test_loader,
+        device='cpu',
+        task_type='binary'
+    )
 
+    # In kết quả
+    print(f"Accuracy: {metrics['accuracy']:.4f}")
+    print(f"F1 Score: {metrics['f1']:.4f}")
+    print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
+    print("\nConfusion Matrix:")
+    print(metrics['confusion_matrix'])
     
     # ---------------------- inference
-
-    
+    results = inference(text="Quán ăn khá sạch sẽ, tôi sẽ quay lại vào lần sau",
+                        model=classifier, path_model=Config.path_model, device=DEVICE)
+    print(results)
 if __name__ == "__main__":
     main()
