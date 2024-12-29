@@ -506,18 +506,20 @@ def inference(
     text_list = []
     text_processed = text_pipelie(text)[:Config.sequence_length]
     if len(text_processed) < Config.sequence_length:
-        pad_size = Config.sequence_length - len(text_processed)
+        pad_size = Config.sequence_length - len(text_processed) - 1
         text_processed = text_processed + [vocab['</s>']] + [vocab['<pad>']] * pad_size
     text_list.append(text_processed)
     input_ids = torch.tensor(text_list, dtype=torch.int64)
 
+
+    id2labels = {0: "NEGATIVE", 1: "POSITIVE"}
     with torch.no_grad():
         logits = model(input_ids)
         print(logits.shape)
 
         probabilities = softmax(logits, dim=-1)  
         predicted_label = torch.argmax(probabilities, dim=-1).item() 
-        return predicted_label
+        return id2labels[predicted_label]
 
 
 def plot_result(num_epochs: int, 
@@ -584,34 +586,34 @@ def main():
     train_loader, val_loader, test_loader = processor.create_dataloader()
 
     # ---------------------- training
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(params=classifier.parameters(), lr=Config.lr)
-    model, metrics = fit(model=classifier, optimizer=optimizer, criterion=criterion, 
-        train_loader=train_loader, val_loader=val_loader, num_epochs=Config.num_epochs, 
-        path_model=Config.path_model, device=DEVICE)
+    # criterion = nn.CrossEntropyLoss()
+    # optimizer = torch.optim.AdamW(params=classifier.parameters(), lr=Config.lr)
+    # model, metrics = fit(model=classifier, optimizer=optimizer, criterion=criterion, 
+    #     train_loader=train_loader, val_loader=val_loader, num_epochs=Config.num_epochs, 
+    #     path_model=Config.path_model, device=DEVICE)
     
     # ---------------------- save results
-    plot_result(num_epochs=Config.num_epochs, 
-                train_accs=metrics['train_accuracies'], 
-                val_accs=metrics['valid_accuracies'], 
-                train_losses=metrics['train_losses'],
-                val_losses=metrics['valid_losses'], 
-                path_storage_result=Config.path_result)
+    # plot_result(num_epochs=Config.num_epochs, 
+    #             train_accs=metrics['train_accuracies'], 
+    #             val_accs=metrics['valid_accuracies'], 
+    #             train_losses=metrics['train_losses'],
+    #             val_losses=metrics['valid_losses'], 
+    #             path_storage_result=Config.path_result)
     
     # ---------------------- evaluate with metrics 
-    metrics = evaluate(
-        model=model,
-        data_loader=test_loader,
-        device='cpu',
-        task_type='binary'
-    )
+    # metrics = evaluate(
+    #     model=model,
+    #     data_loader=test_loader,
+    #     device='cpu',
+    #     task_type='binary'
+    # )
 
-    # ----------------------- Show results 
-    print(f"Accuracy: {metrics['accuracy']:.4f}")
-    print(f"F1 Score: {metrics['f1']:.4f}")
-    print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
-    print("\nConfusion Matrix:")
-    print(metrics['confusion_matrix'])
+    # # ----------------------- Show results 
+    # print(f"Accuracy: {metrics['accuracy']:.4f}")
+    # print(f"F1 Score: {metrics['f1']:.4f}")
+    # print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
+    # print("\nConfusion Matrix:")
+    # print(metrics['confusion_matrix'])
     
     # ---------------------- Inference
     results = inference(text="Quán ăn khá sạch sẽ, tôi sẽ quay lại vào lần sau",
