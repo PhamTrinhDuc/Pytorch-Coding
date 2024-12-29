@@ -363,7 +363,7 @@ def inference(text: str):
     text_list = []
     text_processed = text_pipeline(text)[:Config.sequence_length]
     if len(text_processed) < Config.sequence_length:
-        pad_size = Config.sequence_length - len(text_processed)
+        pad_size = Config.sequence_length - len(text_processed) - 1
         text_processed = text_processed + [vocab['</s>']] + [vocab['<pad>']] * pad_size
     text_list.append(text_processed)
     input_ids = torch.tensor(text_list, dtype=torch.int64)
