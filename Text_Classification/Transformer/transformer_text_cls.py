@@ -61,11 +61,11 @@ class TokenAndPositionEmbedding(nn.Module):
         )
 
     def forward(self, x):
-        N, seq_len = x.size()
-        positions = torch.arange(0, seq_len).expand(N, seq_len).to(device=self.device)
-        token_embed = self.embed_model(x)
-        position_embed = self.pos_embed(positions)
-        return token_embed + position_embed
+        N, seq_len = x.size() # 32, 128
+        positions = torch.arange(0, seq_len).expand(N, seq_len).to(device=self.device) # [N, seq_len]
+        token_embed = self.embed_model(x) # [N, seq_len, embed_dim]
+        position_embed = self.pos_embed(positions) # [N, seq_len, embed_dim]
+        return token_embed + position_embed # [N, seq_len, embed_dim]
 
 
 class TransformerBlock(nn.Module):
