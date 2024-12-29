@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import torch
 import re
+import time
 import string
 import torch.nn as nn
 import torchtext 
@@ -289,56 +290,151 @@ class ProcessingData:
         )
 
 
-def training(model: TransformerClassifier, 
-             criterion: nn.CrossEntropyLoss, 
-             optimizer: torch.optim.AdamW, 
-             train_dataset: DataLoader, 
-             val_dataset: DataLoader, 
-             num_epochs: int,
-             device):
-    train_losses, val_losses = [], []
-    train_accuracies, val_accuracies = [], []
-
-    for num_epoch in range(num_epochs):
-        model.train()
-        train_epoch_acc, train_epoch_loss, total_train = 0.0, 0.0, 0.0
-        for inputs, labels in train_dataset:
-            inputs = inputs.to(device)
-            labels = labels.to(device)
-            optimizer.zero_grad()
-
-            output = model(inputs)
-            loss = criterion(output, labels)
-
-            loss.backward()
-            optimizer.step()
-        
-        val_epoch_acc, val_epoch_loss, total_eval = 0.0, 0.0, 0.0
-        
-        model.eval()
-        with torch.no_grad():
-            for inputs, labels in val_dataset:
-                inputs, labels = inputs.to(device), labels.to(device)
-                output = model(inputs)
-                loss = criterion(output, labels)
-        
+def train_epoch(model: nn.Module, 
+                optimizer: torch.optim.AdamW, 
+                criterion: nn.CrossEntropyLoss, 
+                train_loader: DataLoader, 
+                device: str, 
+                epoch: int, 
+                log_interval: int = 50):
     
-    return train_accuracies, val_accuracies, train_losses, val_losses
+    model.train()
+    train_acc , train_loss = 0.0 , 0.0
+    total = 0.0
+    start_time = time.time()
+
+    for idx, (sentence, label) in enumerate(train_loader):
+        sentence = sentence.to(device)
+        labels = label.to(device)
+        optimizer.zero_grad()
+
+        outputs = model(sentence) # tính outputs của model
+        loss = criterion(outputs, labels) # tính loss
+        train_loss += loss.item()
+
+        #backward
+        loss.backward()
+        optimizer.step()
+
+        train_acc += (torch.argmax(outputs, 1) == labels).sum().item()
+        total += len(labels)
+
+        if idx % log_interval == 0 and idx > 0:
+            print(
+                "| Epoch {:3d} | {}/{} batches | accuracy {:4.2f}".format(
+                    epoch, idx, len(train_loader), train_acc / total
+                )
+            )
+    epoch_acc = train_acc / total
+    epoch_loss = train_loss / len(train_loader)
+    return epoch_acc, epoch_loss
+
+
+def evaluate_epoch(model: nn.Module, 
+                   criterion: nn.CrossEntropyLoss, 
+                   val_loader: DataLoader, 
+                   device: str):
+    val_acc, val_loss = 0.0, 0.0
+    total = 0.0
+
+    model.eval()
+    with torch.no_grad():
+        for idx, (sentences, labels) in enumerate(val_loader):
+            sentences = sentences.to(device)
+            labels = labels.to(device)
+
+            outputs = model(sentences)
+            loss = criterion(outputs, labels)
+
+            val_acc += (torch.argmax(outputs, 1) == labels).sum().item()
+            val_loss += loss.item()
+            total += len(labels)
+
+    epoch_acc = val_acc / total
+    epoch_loss = val_loss / len(val_loader)
+    return epoch_acc, epoch_loss
+
+
+def fit(model: nn.Module, 
+            optimizer: nn.CrossEntropyLoss, 
+            criterion: torch.optim.AdamW, 
+            train_loader: DataLoader, 
+            val_loader: DataLoader, 
+            num_epochs: int,
+            path_model: str, 
+            device: str):
+
+    train_accs, train_losses = [], []
+    eval_accs, eval_losses = [], []
+    best_loss_eval = 100
+    times = []
+    for epoch in range(1, num_epochs):
+        epoch_start_time = time.time()
+
+        # trainning
+        train_acc, train_loss = train_epoch(model, optimizer, criterion, train_loader, device, epoch)
+        train_accs.append(train_acc)
+        train_losses.append(train_loss)
+
+        # evaluate
+        eval_acc, eval_loss = evaluate_epoch(model, criterion, val_loader, device)
+        eval_accs.append(eval_acc)
+        eval_losses.append(eval_loss)
+
+        # save model
+        if eval_loss < best_loss_eval:
+            torch.save(model.state_dict(), path_model)
+            best_loss_eval = eval_loss
+
+        times.append(time.time() - epoch_start_time)
+        print("-" * 60)
+        print(
+            "| end of epoch {:3d} | Time {:5.2f}s | Train Acc {:8.3f} | Train Loss {:8.3f} "
+            "| Val Acc {:8.3f} | Val Loss {:8.3f} ".format(
+                epoch, time.time() - epoch_start_time, train_acc, train_loss, eval_acc, eval_loss
+            )
+        )
+        print("-" * 60)
+
+    model.load_state_dict(torch.load(f=path_model, 
+                                     map_location=torch.device(device=device)))
+    model.eval()
+    metrics = {
+        'train_accuracies': train_accs,
+        'train_losses': train_losses,
+        'valid_accuracies': eval_accs,
+        'valid_losses': eval_losses,
+        'time': times
+    }
+    return model, metrics
 
 
 def inference():
     pass
 
 
-def plot_results():
-    pass 
+def plot_result(num_epochs: int, 
+                train_accs: list, 
+                val_accs: list, 
+                train_losses: list, 
+                val_losses:list,
+                path_storage_result: str = None):
+    
+    epochs = list(range(num_epochs))
+    fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(12, 6))
+    axs[0].plot(epochs, train_accs, label = 'Training')
+    axs[0].plot(epochs, val_accs, label = 'EValuation')
+    axs[0].set_xlabel("Epochs")
+    axs[0].set_ylabel("Acccuracy")
 
-def save_checkpoint():
-    pass
-
-
-def load_checkpoint():
-    pass
+    axs[1].plot(epochs, train_losses, label = 'Training')
+    axs[1].plot(epochs, val_losses, label = 'Evaluation')
+    axs[1].set_xlabel("Epochs")
+    axs[1].set_ylabel("Loss")
+    if path_storage_result:
+        plt.savefig(path_storage_result)
+    
+    plt.legend()
 
 
 def main():
@@ -361,7 +457,7 @@ def main():
 
     classifier = TransformerClassifier(
         num_heads=Config.num_heads,
-        num_layers=Config.num_layer,
+        num_layers=Config.num_layer,        
         embed_dim=Config.embedding_dim,
         sequence_length=Config.sequence_length,
         vocab_size=Config.vocab_size,
@@ -371,9 +467,37 @@ def main():
         device=DEVICE
     )
 
-    mock_data = torch.randint(low=0, high=2, size=(Config.batch_size, Config.sequence_length))
-    output = classifier(mock_data)
-    print(output.size())
+    # mock_data = torch.randint(low=0, high=2, size=(Config.batch_size, Config.sequence_length))
+    # output = classifier(mock_data)
+    # print(output.size())
 
+
+    # ---------------------- Get data
+    df_train = pd.read_csv("data/cls_text/train.csv")
+    df_val = pd.read_csv("data/cls_text/val.csv")
+    df_test = pd.read_csv("data/cls_text/test.csv")
+    processor = ProcessingData(df_train, df_val, df_test)
+    train_loader, val_loader, test_loader = processor.create_dataloader()
+
+    # ---------------------- training
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(params=classifier.parameters(), lr=Config.lr)
+    model, metrics = fit(model=classifier, optimizer=optimizer, criterion=criterion, 
+        train_loader=train_loader, val_loader=val_loader, num_epochs=Config.num_epochs, 
+        path_model=Config.path_model, device=DEVICE)
+    
+    # ---------------------- save results
+    plot_result(num_epochs=Config.num_epochs, 
+                train_accs=metrics['train_accuracies'], 
+                val_accs=metrics['valid_accuracies'], 
+                train_losses=metrics['train_losses'],
+                val_losses=metrics['val_losses'], 
+                path_storage_result=Config.path_result)
+    # ---------------------- evaluate with metrics 
+
+    
+    # ---------------------- inference
+
+    
 if __name__ == "__main__":
     main()
