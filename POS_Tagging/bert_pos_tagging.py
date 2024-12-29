@@ -206,7 +206,7 @@ def main():
 
     # ------------- testing
     results = trainer.evaluate(eval_dataset=data['test_dataset'])
-    print(results)
+    print(results) # {'eval_loss': 0.0901045873761177, 'eval_accuracy': 0.9744520030234316, 'eval_runtime': 4.6972, 'eval_samples_per_second': 125.181, 'eval_steps_per_second': 7.877, 'epoch': 10.0}
 
     # -------------- inference 
     model = AutoModelForTokenClassification.from_pretrained(
