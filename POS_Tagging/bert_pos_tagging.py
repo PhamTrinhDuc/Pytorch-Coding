@@ -184,7 +184,7 @@ def training(train_dataset: Dataset, val_dataset: Dataset):
 
 
 def inference(text: str, model, tokenizer):
-    input = torch.as_tensor(tokenizer.convert_tokens_to_ids(tokens=text.split()))
+    input = torch.as_tensor([tokenizer.convert_tokens_to_ids(text.split())])
     input.to(Config.device)
     outputs = model(input) # [1, 8, len(text.split())]
     _, preds = torch.max(outputs.logits, -1)
