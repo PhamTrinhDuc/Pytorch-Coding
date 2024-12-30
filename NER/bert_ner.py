@@ -1,4 +1,5 @@
 import os
+import torch
 from typing import List, Dict, Tuple
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
@@ -166,22 +167,35 @@ class NERDataset(Dataset):
         return len(self.tokens)
     
     def __getitem__(self, index):
-        token = self.tokens[index]
-        label = self.labels[index]
+        tokens = self.tokens[index]
+        labels = self.labels[index]
 
-        input_token = self.tokenizer.convert_tokens_to_ids(token)
+        input_tokens = self.tokenizer.convert_tokens_to_ids(tokens)
+        attention_mask = [1] * len(input_tokens)
 
+        input_ids = self.pad_and_truncate(inputs=input_tokens, pad_id = self.tokenizer.pad_token_ids)
+        attention_mask = self.pad_and_truncate(inputs=attention_mask, pad_id=0)
+        labels = self.pad_and_truncate(inputs=labels, pad_id=0)
 
+        return {
+            "input_ids": torch.as_tensor(input_ids),
+            "attention_mask": torch.as_tensor(attention_mask),
+            "labels": torch.as_tensor(labels)
+        }
 
+    def pad_and_truncate(self, inputs: List[int], pad_id: int):
+        if len(inputs) < self.max_len:
+            padded_inputs = inputs + [pad_id] * (self.max_len - len(inputs))
+        else:
+            padded_inputs = inputs[:self.max_len]
+        return padded_inputs
+    
 
 def main():
     processor = PreprocessingMaccrobat(dataset_folder="data/ner_data", tokenizer=tokenizer)
     input_texts, input_labels = processor.process()
     Config.label2id = processor.build_label2id(tokens=input_texts)
     Config.id2label = {id: label for label, id in Config.label2id.items()}
-
-
-
 
 if __name__ == "__main__":
     main()
