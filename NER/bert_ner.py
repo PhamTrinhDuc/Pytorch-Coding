@@ -1,20 +1,33 @@
 import os
 import torch
+import evaluate
+import numpy as np
 from typing import List, Dict, Tuple
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer, AutoModelForTokenClassification
+from transformers import TrainingArguments, Trainer
+
 
 class Config:
     model_name: str = "d4data/biomedical-ner-all"
+    model_push_hf: str = "DucPTIT/bert-ner-medical"
     dataset_dir: str = "data/ner_data"
     max_len: int = 512
+    per_device_batch_size: int = 16
+    num_epochs: int = 20
+    device = 'cuda' if torch.cuda.is_available() else "cpu"
 
 
 tokenizer = AutoTokenizer.from_pretrained(
     pretrained_model_name_or_path=Config.model_name
 )
-
+model = AutoModelForTokenClassification.from_pretrained(
+    pretrained_model_name_or_path=Config.model_name, 
+    label2id = Config.label2id, 
+    id2label = Config.id2label, 
+    ignore_mismatched_sizes=True
+)
 
 class PreprocessingMaccrobat:
     def __init__(self, dataset_folder, tokenizer):
@@ -191,11 +204,84 @@ class NERDataset(Dataset):
         return padded_inputs
     
 
-def main():
-    processor = PreprocessingMaccrobat(dataset_folder="data/ner_data", tokenizer=tokenizer)
+def prepare_data(folder_dir: str):
+    processor = PreprocessingMaccrobat(dataset_folder=folder_dir, tokenizer=tokenizer)
     input_texts, input_labels = processor.process()
     Config.label2id = processor.build_label2id(tokens=input_texts)
     Config.id2label = {id: label for label, id in Config.label2id.items()}
+
+
+    inputs_train, inputs_val, labels_train, labels_val = train_test_split(
+        input_texts, input_labels, test_size=0.2, random_state=42
+    ) 
+    train_dataset = NERDataset(input_texts=inputs_train, input_labels=labels_train, 
+                               tokenizer=tokenizer, label2id=Config.label2id)
+    val_dataset = NERDataset(input_texts=inputs_val, input_labels=labels_val, 
+                             tokenizer=tokenizer, label2id=Config.label2id)
+    
+    return train_dataset, val_dataset
+
+def compute_metrics(eval_pred):
+    metric = evaluate.load("accuracy")
+
+    predictions, labels = eval_pred
+    mask = labels != 0
+    predictions = np.argmax(predictions, axis = -1)
+    return metric.compute(predictions=predictions[mask], references=labels[mask])
+
+
+def trainning(train_dataset, val_dataset):
+    args = TrainingArguments(
+        output_dir="./NER/checkpoint", 
+        learning_rate=1e-4, 
+        per_device_eval_batch_size=Config.per_device_batch_size, 
+        per_device_train_batch_size=Config.per_device_batch_size, 
+        eval_strategy="epoch", 
+        save_strategy="epoch", 
+        num_train_epochs=Config.num_epochs, 
+        optim="adamw_torch", 
+        load_best_model_at_end=True
+    )
+
+    trainer = Trainer(
+        args=args, 
+        model=model, 
+        train_dataset=train_dataset, 
+        eval_dataset=val_dataset, 
+        tokenizer=tokenizer, 
+        compute_metrics=compute_metrics
+    )
+
+    trainer.train()
+    model.push_to_hub(Config.model_push_hf)
+    tokenizer.push_to_hub(Config.model_push_hf)
+
+
+def inference(text: str):
+    inputs = torch.as_tensor(tokenizer.convert_tokens_to_ids(text.split())).to(Config.device)
+    output = model(inputs)
+    # print(output.logits.shape) # [1, 63, 83]
+
+    _, preds = torch.max(output.logits, -1)
+    preds = preds[0].cpu().numpy()
+
+    for token, pred in zip(text.split(), preds):
+        print(f"{token}\t{Config.id2label[pred]}")
+
+
+def main():
+    train_dataset, val_dataset = prepare_data(folder_dir=Config.dataset_dir)
+    trainning(train_dataset=train_dataset, val_dataset=val_dataset)
+
+    test_sentence = """A 48 year - old female presented with vaginal bleeding and abnormal Pap smears .
+    Upon diagnosis of invasive non - keratinizing SCC of the cervix ,
+    she underwent a radical hysterectomy with salpingo - oophorectomy
+    which demonstrated positive spread to the pelvic lymph nodes and the parametrium .
+    Pathological examination revealed that the tumour also extensively involved the lower uterine segment .
+    """
+    inference(text=test_sentence)
+
+
 
 if __name__ == "__main__":
     main()
