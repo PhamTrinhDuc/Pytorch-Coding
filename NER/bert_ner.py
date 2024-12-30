@@ -268,6 +268,9 @@ def inference(text: str):
     for token, pred in zip(text.split(), preds):
         print(f"{token}\t{Config.id2label[pred]}")
 
+    for token, pred in zip(tokenizer.tokenize(text), preds):
+        print(f"{token}\t{Config.id2label[pred]}")
+
 
 def main():
     train_dataset, val_dataset = prepare_data(folder_dir=Config.dataset_dir)
