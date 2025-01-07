@@ -49,16 +49,14 @@ class Vocab:
         return input_ids
 
 
-    def vectorize(self, text):
+    def vectorize(self, text: str) -> list[int]:
         input_ids = [self.vocab[token] for token in self.tokenizer(text)]
         input_ids = self.pad_and_truncate(input_ids)
-
         return input_ids
-    
 
-    def decode(self, input_ids):
+    def decode(self, input_ids: list[int]):
         return [self.vocab.get_itos()[token_id] for token_id in input_ids]
-    
+
 
 if __name__ == "__main__":
     vocab = Vocab(df)
