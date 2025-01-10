@@ -133,7 +133,7 @@ class SelfAttention(nn.Module):
         x_q = self.rotary_embedding(x_q, st_pos) # [N, seq_len, num_heads_q, head_dim]
         x_k = self.rotary_embedding(x_k, st_pos) # [N, seq_len, num_heads_kv, head_dim]
 
-        # save current K, V to cache
+        # save current K, V of current token to cache
         self.cache_k[:batch, st_pos: st_pos + seq_len, ...] = x_k # st_pos: st_pos + seq_len ~ cache_len
         self.cache_v[:batch, st_pos: st_pos + seq_len, ...] = x_v # st_pos: st_pos + seq_len ~ cache_len
         
@@ -195,16 +195,18 @@ class FeedForward(nn.Module):
 class Llama2Block(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        self.norm = RMSNorm(d_model=args.d_model, eps=args.norm_eps)
         self.attention = SelfAttention(args=args)
-        self.ffn = FeedForward(args=args)
+        self.feed_forward = FeedForward(args=args)
+        self.attentio_norm = RMSNorm(d_model=args.d_model, eps=args.norm_eps)
+        self.ffn_norm = RMSNorm(d_model=args.d_model, eps=args.norm_eps)
 
-    def forward(self, x: torch.Tensor, st_pos: int):
-        x_norm = self.norm(x) # [N, seq_len, d_model]
+
+    def forward(self, x: torch.Tensor, st_pos: int, mask: Optional[torch.Tensor] = None):
+        x_norm = self.attentio_norm(x) # [N, seq_len, d_model]
         # [N, seq_len, d_model] + [N, seq_len, d_model] = [N, seq_len, d_model]
-        x_attention = x + self.attention(x_norm, st_pos) 
+        x_attention = x + self.attention(x_norm, st_pos, mask) 
         # [N, seq_len, d_model] + [N, seq_len, d_model] = [N, seq_len, d_model]
-        out = x_attention + self.ffn(self.norm(x_attention)) # [N, seq_len, d_model]
+        out = x_attention + self.ffn_norm(self.ffn_norm(x_attention)) # [N, seq_len, d_model]
         return out
     
 
@@ -218,7 +220,7 @@ class Llama2Layer(nn.Module):
         self.n_layers = args.n_layers
         self.embed_model = nn.Embedding(num_embeddings=self.vocab_size, 
                                         embedding_dim=args.d_model)
-        
+
         self.layers = nn.ModuleList([
             Llama2Block(args) for _ in range(self.n_layers)
         ])
@@ -230,12 +232,24 @@ class Llama2Layer(nn.Module):
         batch_size, seq_len = x.shape
         output = self.embed_model(x) # [N, seq_len, d_model]
 
+
+        mask = None
+        if seq_len > 1: 
+            mask = torch.full(
+                size=(seq_len, seq_len), fill_value=float("-inf"), device=x.device
+            )
+            # create the upper triangular part of the matrix. top half -inf, bottom half 1
+            mask = torch.triu(input=mask, diagonal=1) 
+            # The initial mask matrix <mask above> is ​​created only for the current token (as if it doesn't know about cached tokens). 
+            # However, since new tokens still need to interact with cached tokens, it is necessary to recombine the cached tokens into the mask matrix.
+            mask = torch.hstack([torch.zeros((seq_len, st_pos), device=x.device), 
+                                mask]).type_as(output)
+
         for layer in self.layers:
-            output = layer(output, st_pos) # [N, seq_len, d_model]
+            output = layer(output, st_pos, mask) # [N, seq_len, d_model]
         output = self.norm(output) # [N, seq_len, d_model]
         output = self.fc(output) # [N, seq_len, vocab_size]
         return output.float()
-
 
 def main():
 
@@ -283,6 +297,7 @@ def main():
     mock_data = mock_data[:, st_pos: st_pos+5]
 
     llama_layer = Llama2Layer(args=args)
+    print(llama_layer)
     output = llama_layer(mock_data, st_pos=st_pos)
     print(output.shape)
 
