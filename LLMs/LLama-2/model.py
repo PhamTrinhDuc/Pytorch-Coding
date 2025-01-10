@@ -8,8 +8,8 @@ from typing import Optional
 class ModelArgs:
     d_model: int = 2048 # origin: 4096
     n_layers: int = 8 # origin: 32
-    n_heads: int = 8 # origin: 32
-    head_dim: int = d_model // n_heads # depth
+    num_heads: int = 8 # origin: 32
+    head_dim: int = d_model // num_heads # depth
     n_kv_heads: Optional[int] = None
     vocab_size: int  = -1 
     ff_dim: Optional[int] = None
@@ -77,20 +77,20 @@ class SelfAttention(nn.Module):
         
         super().__init__()
         self.batch_size = args.batch_size
-        self.num_heads = args.n_heads
+        self.num_heads = args.num_heads
         # Indicates the number of heads for the Keys and Values (heads in a group)
-        self.n_kv_heads = args.n_heads if args.n_heads is not None else args.n_kv_heads
-        # Indicates the number of heads for the Queries = n_heads
-        self.n_q_heads = args.n_heads
+        self.n_kv_heads = args.num_heads if args.num_heads is not None else args.n_kv_heads
+        # Indicates the number of heads for the Queries = num_heads
+        self.n_q_heads = args.num_heads
         # Indicates how many times the Keys and Values should be repeated (num of groups)
         self.n_rep = self.n_q_heads // self.n_kv_heads
         #  Indicates the dimension of each head, that is, the part of the embedding that each head will be responsible for
-        self.head_dim = args.d_model // args.n_heads
+        self.head_dim = args.d_model // args.num_heads
 
         self.rotary_embedding = RotaryPositionalEmbedding(depth=self.head_dim)
         
         self.Wq = nn.Linear(in_features=args.d_model, 
-                            out_features=self.head_dim * args.n_heads, 
+                            out_features=self.head_dim * args.num_heads, 
                             bias=False)
         self.Wk = nn.Linear(in_features=self.d_model, 
                             out_features=self.head_dim * self.n_kv_heads,
@@ -98,19 +98,32 @@ class SelfAttention(nn.Module):
         self.Wv = nn.Linear(in_features=args.d_model, 
                             out_features=self.head_dim * self.n_kv_heads, 
                             bias=False)
-        self.Wo = nn.Linear(in_features=self.head_dim * args.n_heads, 
+        self.Wo = nn.Linear(in_features=self.head_dim * args.num_heads, 
                             out_features=args.d_model,
                             bias=False)
-        self.cache_k = torch.zeros((args.batch_size, args.seq_len, args.n_heads, args.head_dim))
-        self.cache_v = torch.zeros((args.batch_size, args.seq_len, args.n_heads, args.head_dim))
+        self.cache_k = torch.zeros((args.batch_size, args.seq_len, args.num_heads, args.head_dim))
+        self.cache_v = torch.zeros((args.batch_size, args.seq_len, args.num_heads, args.head_dim))
 
     def split_heads(self, x: torch.Tensor, num_heads: int):
         # [N, seq_len, num_heads(q or kv) * head_dim] -> [N, seq_len, num_heads(q or kv), head_dim] 
         out = x.view(self.batch_size, self.args.seq_len, num_heads, self.args.head_dim)
         return out
     
-    def forward(self, x: torch.Tensor, st_pos: int):
+    def repeat_kv(self, x: torch.Tensor, n_rep: int) -> torch.Tensor:
+        batch_size, cache_len, num_heads_kv, head_dim = x.size() 
 
+        if n_rep == 1:
+            return x # # [N, cache_len + seq_len, num_heads_kv, head_dim]
+        
+        return (
+            # [N, cache_len + seq_len, num_heads_kv, head_dim]
+            x[:, :, :, None, :] # [N, cache_len + seq_len, num_heads_kv, 1, head_dim]
+            .expand(batch_size, cache_len, num_heads_kv, n_rep, head_dim) # [N, cache_len + seq_len, num_heads_kv, n_rep, head_dim]
+            .reshape(batch_size, cache_len, num_heads_kv * n_rep, head_dim) # # [N, cache_len + seq_len, num_heads_kv*n_rep, head_dim]
+        )
+    
+    def forward(self, x: torch.Tensor, st_pos: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        batch, seq_len, d_model = x.size() ##### seq_len = 1 ~ 1 token
         # [N, seq_len, d_model] ==> [N, seq_len, num_heads(q or kv) * head_dim] ==> [N, seq_len, num_heads(q or kv), head_dim]
         x_q = self.split_heads(x=self.Wq(x), num_heads=self.n_q_heads)  
         x_k = self.split_heads(x=self.Wk(x), num_heads=self.n_kv_heads)  
@@ -119,31 +132,41 @@ class SelfAttention(nn.Module):
         x_q = self.rotary_embedding(x_q) # [N, seq_len, num_heads_q, head_dim]
         x_k = self.rotary_embedding(x_k) # [N, seq_len, num_heads_kv, head_dim]
 
+        # save current K, V to cache
+        self.cache_k[:batch, st_pos: st_pos + seq_len, ...] = x_k # st_pos: st_pos + seq_len ~ cache_len
+        self.cache_v[:batch, st_pos: st_pos + seq_len, ...] = x_v # st_pos: st_pos + seq_len ~ cache_len
+        
+        # Get the key and value from the beginning to the current token
+        keys = self.cache_k[:batch, :st_pos + seq_len, ...] # [N, cache_len + seq_len, num_heads_kv, head_dim]
+        values = self.cache_v[:batch, :st_pos + seq_len, ...] # [N, cache_len + seq_len, num_heads_kv, head_dim]
+
+        # Repeat the number of heads of K, V (number of heads in a group) n_rep times (number of groups) to match the number of heads Q(num_heas of the model)
+        keys = self.repeat_kv(keys, self.n_rep) # [N, cache_len + seq_len, num_heads_q, head_dim]
+        values = self.repeat_kv(values, self.n_rep) # [N, cache_len + seq_len, num_heads_q, head_dim]
 
 
+        x_q = x_q.transpose(1, 2) # [N, num_heads_q, seq_len, head_dim]
+        keys = keys.transpose(1, 2) # [N, num_heads_q, cache_len + seq_len, head_dim]
+        values = values.transpose(1, 2) # [N, num_heads_q, cache_len + seq_len, head_dim]
 
+        # =============== Scaled dot product
+        # [N, num_heads_q, seq_len, head_dim] @ [N, num_heads_q, head_dim, cache_len + seq_len] = [N, num_heads_q, seq_len, cache_len + seq_len]
+        Y = torch.matmul(x_q, keys.transpose(2, 3)) / torch.sqrt(self.head_dim)
+        if mask is not None:
+            Y = Y + mask # [N, num_heads_q, seq_len, cache_len + seq_len]
+        Y = nn.functional.softmax(A.float(), dim=-1).type_as(x) # [N, num_heads_q, seq_len, cache_len + seq_len]
 
+        # [N, num_heads_q, seq_len, cache_len + seq_len] @ [N, num_heads_q, cache_len + seq_len, head_dim] = [N, num_heads_q, seq_len, head_dim]
+        A = torch.matmul(Y, values)
+        # [N, num_heads_q, seq_len, head_dim] ==> [N, seq_len, num_heads_q, head_dim] ==> [N, seq_len, d_model]
+        A = x.transpose(1, 2).contiguous().view(batch, seq_len, -1)
 
+        output = self.Wo(A) # [N, seq_len, d_model]
+        return output
 
 
 class FeedForward(nn.Module):
     def __init__(self, args: ModelArgs):
-
-        """
-        Initialize the FeedForward module.
-
-        Args:
-            dim (int): Input dimension.
-            hidden_dim (int): Hidden dimension of the feedforward layer.
-            multiple_of (int): Value to ensure hidden dimension is a multiple of this value.
-            ffn_dim_multiplier (float, optional): Custom multiplier for hidden dimension. Defaults to None.
-
-        Attributes:
-            w1 (Linear): Linear transformation for the first layer.
-            w2 (Linear): Linear transformation for the second layer.
-            w3 (Linear): Linear transformation for the third layer.
-
-        """
 
         super().__init__()
         hidden_dim = 4 * args.d_model
@@ -185,7 +208,7 @@ class Llama2Block(nn.Module):
         return out
     
 
-class Llama2Model(nn.Module):
+class Llama2Layer(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
 
@@ -224,11 +247,11 @@ def main():
 
     # =========================== Rotary embedding
     mock_data = torch.randint(low=0, high=1, size=(args.batch_size, 
-                                                   args.n_heads, 
+                                                   args.num_heads, 
                                                    args.seq_len,
                                                    args.head_dim))
     embed = RotaryPositionalEmbedding(
-        depth=args.d_model // args.n_heads
+        depth=args.d_model // args.num_heads
     )
     freqs = embed(mock_data)
     # print(freqs.shape)
