@@ -6,53 +6,52 @@ from typing import Optional
 
 @dataclass
 class ModelArgs:
-    d_model: int = 2048 # origin: 4096
-    n_layers: int = 8 # origin: 32
-    num_heads: int = 8 # origin: 32
+    d_model: int = 1024 # origin: 4096
+    n_layers: int = 4 # origin: 32
+    num_heads: int = 4 # origin: 32
     head_dim: int = d_model // num_heads # depth
     n_kv_heads: Optional[int] = None
-    vocab_size: int  = -1 
+    vocab_size: int  = 1000
     ff_dim: Optional[int] = None
     multiple_of: int = 256
     ffn_dim_multiplier: Optional[float] = None
     norm_eps: float = 0.01
     
     batch_size: int = 32
-    seq_len: int = 1024 # origin: 2048
+    seq_len: int = 512 # origin: 2048
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class RotaryPositionalEmbedding(nn.Module):
     def __init__(self, 
-                 depth: int, # d_model // num_heads
+                 args: ModelArgs,
                  base: int = 10000):
         super().__init__()
-        theta = 1.0 / (base ** (torch.arange(0, depth, 2) / depth)) # [depth//2 ,]
+        self.args = args
+        self.head_dim = args.d_model // args.num_heads
+        self.seq_len = args.seq_len
+        theta = 1.0 / (base ** (torch.arange(0, self.head_dim, 2) / self.head_dim)) # [depth//2 ,]
         self.register_buffer(name="theta", tensor=theta)
         
-    def forward(self, x: torch.Tensor):
-        # x: [N, num_heads, seq_len, depth] 
-        # do seq_len kh cố định < tokenizer của gpt2 thiết kế cho chiều dài đông>, 
-        # vì vậy ta sẽ tạo postions khi có seq_len đưuọc lấy từ x
-        seq_len = x.size(2)
-        
-        positions = torch.arange(0, seq_len)[:, None] # [seq_len, 1]
+    def forward(self, x: torch.Tensor, st_pos: int):
+        # x: [N, seq_len, num_heads, depth] 
+        seq_len_token = x.size(1)
+        positions = torch.arange(0, self.seq_len)[:, None] # [seq_len, 1]
         # print("positions: ", positions.shape)
         # print("theta: ", self.theta.shape)
-        theta_cp = positions * self.theta
-        x_even, x_odd = x[..., 0::2], x[..., 1::2] # [N, num_heads, seq_len, depth//2]
+        theta_cp = positions * self.theta # [seq_len, depth//2]
+        theta_cp = theta_cp[st_pos: st_pos + seq_len_token]
+        x_even, x_odd = x[..., 0::2], x[..., 1::2] # [N, seq_len, num_heads, depth//2]
         
-        sin_angles = torch.sin(theta_cp) # [seq_len, depth//2]
-        cos_angles = torch.cos(theta_cp) # [seq_len, depth//2]
-        # print(x_even.shape)
-        # print(cos_angles.shape)
+        sin_angles = torch.sin(theta_cp)[None, :, None, :] # [1, seq_len, 1, depth//2]
+        cos_angles = torch.cos(theta_cp)[None, :, None, :] # [1, seq_len, 1, depth//2]
 
-        x_even_rotated = x_even * cos_angles - x_odd * sin_angles # [N, num_heads, seq_len, depth//2]
-        x_odd_rotated = x_even * sin_angles + x_odd * cos_angles # [N, num_heads, seq_len, depth//2]
+        x_even_rotated = x_even * cos_angles - x_odd * sin_angles # [N, seq_len, num_heads, depth//2]
+        x_odd_rotated = x_even * sin_angles + x_odd * cos_angles # [N, seq_len, num_heads, depth//2]
 
-        x_rotated = torch.ones_like(x) # [N, num_heads, seq_len, depth]
-        x_rotated[..., 0::2] = x_even_rotated
-        x_rotated[..., 1::2] = x_odd_rotated
+        x_rotated = torch.ones_like(x) # [N, seq_len, num_heads, depth]
+        x_rotated[..., 0::2] = x_even_rotated # [N, seq_len, num_heads, depth//2]
+        x_rotated[..., 1::2] = x_odd_rotated # [N, seq_len, num_heads, depth//2]
 
         return x_rotated
 
@@ -87,12 +86,12 @@ class SelfAttention(nn.Module):
         #  Indicates the dimension of each head, that is, the part of the embedding that each head will be responsible for
         self.head_dim = args.d_model // args.num_heads
 
-        self.rotary_embedding = RotaryPositionalEmbedding(depth=self.head_dim)
+        self.rotary_embedding = RotaryPositionalEmbedding(args=args)
         
         self.Wq = nn.Linear(in_features=args.d_model, 
                             out_features=self.head_dim * args.num_heads, 
                             bias=False)
-        self.Wk = nn.Linear(in_features=self.d_model, 
+        self.Wk = nn.Linear(in_features=args.d_model, 
                             out_features=self.head_dim * self.n_kv_heads,
                             bias=False)
         self.Wv = nn.Linear(in_features=args.d_model, 
@@ -105,8 +104,9 @@ class SelfAttention(nn.Module):
         self.cache_v = torch.zeros((args.batch_size, args.seq_len, args.num_heads, args.head_dim))
 
     def split_heads(self, x: torch.Tensor, num_heads: int):
+        batch_size, seq_len, d_model = x.size()
         # [N, seq_len, num_heads(q or kv) * head_dim] -> [N, seq_len, num_heads(q or kv), head_dim] 
-        out = x.view(self.batch_size, self.args.seq_len, num_heads, self.args.head_dim)
+        out = x.view(batch_size, seq_len, num_heads, self.head_dim)
         return out
     
     def repeat_kv(self, x: torch.Tensor, n_rep: int) -> torch.Tensor:
@@ -123,14 +123,15 @@ class SelfAttention(nn.Module):
         )
     
     def forward(self, x: torch.Tensor, st_pos: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x = x.float()
         batch, seq_len, d_model = x.size() ##### seq_len = 1 ~ 1 token
         # [N, seq_len, d_model] ==> [N, seq_len, num_heads(q or kv) * head_dim] ==> [N, seq_len, num_heads(q or kv), head_dim]
         x_q = self.split_heads(x=self.Wq(x), num_heads=self.n_q_heads)  
         x_k = self.split_heads(x=self.Wk(x), num_heads=self.n_kv_heads)  
         x_v = self.split_heads(x=self.Wv(x), num_heads=self.n_kv_heads)  
 
-        x_q = self.rotary_embedding(x_q) # [N, seq_len, num_heads_q, head_dim]
-        x_k = self.rotary_embedding(x_k) # [N, seq_len, num_heads_kv, head_dim]
+        x_q = self.rotary_embedding(x_q, st_pos) # [N, seq_len, num_heads_q, head_dim]
+        x_k = self.rotary_embedding(x_k, st_pos) # [N, seq_len, num_heads_kv, head_dim]
 
         # save current K, V to cache
         self.cache_k[:batch, st_pos: st_pos + seq_len, ...] = x_k # st_pos: st_pos + seq_len ~ cache_len
@@ -151,10 +152,10 @@ class SelfAttention(nn.Module):
 
         # =============== Scaled dot product
         # [N, num_heads_q, seq_len, head_dim] @ [N, num_heads_q, head_dim, cache_len + seq_len] = [N, num_heads_q, seq_len, cache_len + seq_len]
-        Y = torch.matmul(x_q, keys.transpose(2, 3)) / torch.sqrt(self.head_dim)
+        Y = torch.matmul(x_q, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
         if mask is not None:
             Y = Y + mask # [N, num_heads_q, seq_len, cache_len + seq_len]
-        Y = nn.functional.softmax(A.float(), dim=-1).type_as(x) # [N, num_heads_q, seq_len, cache_len + seq_len]
+        Y = nn.functional.softmax(Y.float(), dim=-1).type_as(x) # [N, num_heads_q, seq_len, cache_len + seq_len]
 
         # [N, num_heads_q, seq_len, cache_len + seq_len] @ [N, num_heads_q, cache_len + seq_len, head_dim] = [N, num_heads_q, seq_len, head_dim]
         A = torch.matmul(Y, values)
@@ -227,14 +228,11 @@ class Llama2Layer(nn.Module):
         self.fc = nn.Linear(in_features=args.d_model, out_features=self.vocab_size)
 
     def forward(self, x: torch.Tensor, st_pos: int):
-        batch_size, seq_len = x.size()
-        assert seq_len == 1, "Only one token at a time can be processed"
+        batch_size, seq_len = x.shape
         output = self.embed_model(x) # [N, seq_len, d_model]
 
-        freqs_complex = self.freq_complex[st_pos: st_pos + seq_len]
-
         for layer in self.layers:
-            output = layer(output, st_pos, freqs_complex)
+            output = layer(output, st_pos)
         output = self.norm(output)
         output = self.fc(output)
         return output.float()
@@ -246,27 +244,49 @@ def main():
     args = ModelArgs
 
     # =========================== Rotary embedding
-    mock_data = torch.randint(low=0, high=1, size=(args.batch_size, 
-                                                   args.num_heads, 
-                                                   args.seq_len,
-                                                   args.head_dim))
-    embed = RotaryPositionalEmbedding(
-        depth=args.d_model // args.num_heads
-    )
-    freqs = embed(mock_data)
+    # mock_data = torch.randint(low=0, high=1, size=(args.batch_size, 
+    #                                                args.num_heads, 
+    #                                                args.seq_len,
+    #                                                args.head_dim))
+    # embed = RotaryPositionalEmbedding(
+    #     depth=args.d_model // args.num_heads
+    # )
+    # freqs = embed(mock_data, st_pos=0)
     # print(freqs.shape)
 
     # ============================ RMSNorm 
-    mock_data = torch.randint(0, 1, size=(args.batch_size, args.seq_len, args.d_model))
-    norm = RMSNorm(d_model=args.d_model)
-    out_norm = norm(mock_data)
+    # mock_data = torch.randint(0, 1, size=(args.batch_size, args.seq_len, args.d_model))
+    # norm = RMSNorm(d_model=args.d_model)
+    # out_norm = norm(mock_data)
     # print(out_norm.shape)
 
     # ============================ Feed Forward
-    mock_data = torch.randint(0, 1, (args.batch_size, args.seq_len, args.d_model))
-    ffn = FeedForward(args=args)
-    out_ffn = ffn(mock_data)
-    print(out_ffn.shape)
+    # mock_data = torch.randint(0, 1, (args.batch_size, args.seq_len, args.d_model))
+    # ffn = FeedForward(args=args)
+    # out_ffn = ffn(mock_data)
+    # print(out_ffn.shape)
+
+    # ============================ Self Attention
+    # mock_data = torch.randint(0, 1, size=(args.batch_size, 1, args.d_model))
+    # self_attention = SelfAttention(args=args)
+    # output = self_attention(mock_data, st_pos=0)
+    # print(output.shape)
+
+    # ============================ Llama-2 Block
+    # mock_data = torch.randint(0, 1, size=(args.batch_size, 1, args.d_model))
+    # llama_block = Llama2Block(args=args)
+    # output = llama_block(mock_data, st_pos=0)
+    # print(output.shape)
+
+    # ============================ LLama-2 Layer
+    mock_data = torch.randint(0, 10, size=(args.batch_size, args.seq_len))
+    st_pos = 1
+    mock_data = mock_data[:, st_pos: st_pos+5]
+
+    llama_layer = Llama2Layer(args=args)
+    output = llama_layer(mock_data, st_pos=st_pos)
+    print(output.shape)
+
 
 if __name__ == "__main__":
     main()
