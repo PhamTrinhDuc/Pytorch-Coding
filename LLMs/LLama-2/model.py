@@ -65,10 +65,10 @@ class RMSNorm(nn.Module):
     
     def forward(self, x):
         x = x.float() # [N, seq_len, d_model]
-        norm = torch.sqrt(torch.mean(input=x**2, dim=-1, keepdim=True)) + self.eps
-        x_hat = x / norm
-        y = x_hat * self.weights
-        return y # # [N, seq_len, d_model]
+        norm = torch.sqrt(torch.mean(input=x**2, dim=-1, keepdim=True)) + self.eps # [N, seq_len, d_model]
+        x_hat = x / norm  # [N, seq_len, d_model]
+        y = x_hat * self.weights # [N, seq_len, d_model]
+        return y 
     
 
 class SelfAttention(nn.Module):
@@ -177,7 +177,6 @@ class FeedForward(nn.Module):
 
         # Round the hidden_dim to the nearest multiple of the multiple_of parameter
         hidden_dim = args.multiple_of * ((hidden_dim + args.multiple_of - 1) // args.multiple_of)
-
         # The above lines are the configuration of llama2 to help increase gpu performance
         self.linear1 = nn.Linear(in_features=args.d_model, out_features=hidden_dim, bias=False)
         self.linear2 = nn.Linear(in_features=hidden_dim, out_features=args.d_model, bias=False)
@@ -205,7 +204,7 @@ class Llama2Block(nn.Module):
         # [N, seq_len, d_model] + [N, seq_len, d_model] = [N, seq_len, d_model]
         x_attention = x + self.attention(x_norm, st_pos) 
         # [N, seq_len, d_model] + [N, seq_len, d_model] = [N, seq_len, d_model]
-        out = x_attention + self.ffn(self.norm(x_attention)) 
+        out = x_attention + self.ffn(self.norm(x_attention)) # [N, seq_len, d_model]
         return out
     
 
@@ -232,9 +231,9 @@ class Llama2Layer(nn.Module):
         output = self.embed_model(x) # [N, seq_len, d_model]
 
         for layer in self.layers:
-            output = layer(output, st_pos)
-        output = self.norm(output)
-        output = self.fc(output)
+            output = layer(output, st_pos) # [N, seq_len, d_model]
+        output = self.norm(output) # [N, seq_len, d_model]
+        output = self.fc(output) # [N, seq_len, vocab_size]
         return output.float()
 
 
