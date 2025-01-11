@@ -12,10 +12,12 @@ class GPTConfig124M:
     seq_len: int = 1024
     d_model:int =  768
     ff_dim: int = d_model * 4
+    max_new_tokens: int = 10
     num_heads: int = 12
     num_layers: int = 12
     drop_rate:float =  0.05
     qkv_bias: bool = False
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class GPTDataset(Dataset):
@@ -54,6 +56,32 @@ def create_dataloader(text: str, batch_size: 4, max_len: int = 256, stride: int 
         drop_last=is_drop_last
     )
     return dataloader
+
+
+class TokenAndPositionEmbedding(nn.Module):
+    def __init__(self, 
+                 embed_dim: int, 
+                 vocab_size: int, 
+                 max_length: int, 
+                 device: str):
+        super().__init__()
+        self.device = device
+        self.embed_model = nn.Embedding(
+            num_embeddings=vocab_size, 
+            embedding_dim=embed_dim
+        )
+
+        self.pos_embed = nn.Embedding(
+            num_embeddings=max_length,
+            embedding_dim=embed_dim
+        )
+
+    def forward(self, x):
+        N, seq_len = x.size()
+        positions = torch.arange(0, seq_len).expand(N, seq_len).to(device=self.device) # [N, seq_len]
+        token_embed = self.embed_model(x) # [N, seq_len, embed_dim]
+        position_embed = self.pos_embed(positions) # [N, seq_len, embed_dim]
+        return token_embed + position_embed # [N, seq_len, embed_dim]
 
 
 class LayerNorm(nn.Module):
@@ -98,25 +126,25 @@ class MultiHeadAttention(nn.Module):
 
         self.dropout = nn.Dropout(p=dropout)
 
-        self.mask =torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool()
 
     def split_heads(self, x: torch.Tensor):
         batch_size, seq_len, d_model = x.size()
         return x.view(batch_size, self.num_heads, seq_len, self.head_dim)
     
-    def scaled_dot_product_attention(self, Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor):
+    def scaled_dot_product_attention(self, Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask = None):
         matmul_QK = torch.matmul(Q, K.transpose(2, 3)) # [N, num_heads, seq_len, seq_len]
         dk = torch.tensor(K.size(-1), dtype=torch.float32)
         scaled_dot_product = matmul_QK / dk # [N, num_heads, seq_len, seq_len]
         # masked 
-        scaled_dot_product = scaled_dot_product.masked_fill_(mask=self.mask, value=-torch.inf) 
+        if mask is not None:
+            scaled_dot_product.masked_fill_(mask=mask, value=-torch.inf) 
 
         attention_weights = F.softmax(scaled_dot_product, dim=-1) # [N, num_heads, seq_len, seq_len]
         # [N, num_heads, seq_len, seq_len] @  [N, num_heads, seq_len, head_dim] = [N, num_heads, seq_len, head_dim]
         output = torch.matmul(attention_weights, V)
         return attention_weights, output
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor,):
         # x: [N, seq_len, d_model]
         batch_size, seq_len, d_model = x.size()
         # [N, seq_len, d_model] => [N, seq_len, d_model] => [N, num_heads, seq_len, head_dim]
@@ -124,7 +152,9 @@ class MultiHeadAttention(nn.Module):
         K = self.split_heads(self.Wk(x))
         V = self.split_heads(self.Wv(x))
 
-        attention_weights, output = self.scaled_dot_product_attention(Q, K, V)
+        mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool()[:seq_len, :seq_len]
+
+        attention_weights, output = self.scaled_dot_product_attention(Q, K, V, mask=mask)
         # [N, num_heads, seq_len, head_dim] => [N, seq_len, num_heads, head_dim] => [N, seq_len, d_model]
         output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
         A = self.Wo(output)
@@ -179,10 +209,11 @@ class TransformerBlock(nn.Module):
 class GPTModel(nn.Module):
     def __init__(self, args: GPTConfig124M):
         super().__init__()
-        self.embedding_token = nn.Embedding(num_embeddings=args.vocab_size, 
-                                            embedding_dim=args.d_model)
-        self.embedding_pos = nn.Embedding(num_embeddings=args.seq_len, 
-                                          embedding_dim=args.d_model)
+        self.args = args
+        self.embedding = TokenAndPositionEmbedding(embed_dim=args.d_model, 
+                                                   vocab_size=args.vocab_size,
+                                                   max_length=args.seq_len,
+                                                   device=args.device)
         self.drop_embed = nn.Dropout(p=args.drop_rate)
         
         self.layers = nn.ModuleList([
@@ -194,10 +225,8 @@ class GPTModel(nn.Module):
 
     def forward(self, x):
         # x: [N, seq_len]
-        embed_token = self.embedding_token(x) # [N, seq_len, d_model]
-        embed_pos = self.embedding_pos(x) # [N, seq_len, d_model]
-        embed_final = embed_token + embed_pos # [N, seq_len, d_model]
-        embed_dropout = self.drop_embed(embed_final) # [N, seq_len, d_model]
+        embedding = self.embedding(x) # [N, seq_len, d_model]
+        embed_dropout = self.drop_embed(embedding) # [N, seq_len, d_model]
 
         for layer in self.layers:
             logits = layer(embed_dropout) # # [N, seq_len, d_model]
@@ -205,10 +234,29 @@ class GPTModel(nn.Module):
         logits = self.fc(logits) # [N, seq_len, vocab_size]
         return logits
 
+def generate_text_simple(model: GPTModel, 
+                         input: torch.Tensor, 
+                         max_new_tokens: int, 
+                         context_length: int):
+    
+    for _ in range(max_new_tokens):
+        input_model= input[:, -context_length:] # [N, seq_len]
+        # get predictions
+        with torch.no_grad():
+            logits = model(input_model)
+        
+        # Focus only on the last time step
+        # (batch, seq_len, vocab_size) => (batch, vocab_size)
+        logits = logits[:, -1, :]
+        idx_next = torch.argmax(logits, dim=-1, keepdim=True) # [batch, 1]
+        input = torch.cat((input, idx_next), dim=1) # [batch, seq_len+1]
+    return input # [batch, len(context_tokens) + max_new_tokens]
+
+
 
 def main():
     # ================================= DEBUGGING
-    # ================================ MultiHeadAttention
+    # ================================= MultiHeadAttention
     args = GPTConfig124M
     # mock_data = torch.randn(size=(1, args.seq_len, args.d_model))
     # multihead = MultiHeadAttention(d_model=args.d_model, num_heads=args.num_heads)
@@ -221,11 +269,34 @@ def main():
     # print(output.shape)
 
     # ================================= GPT2 Model
-    mock_data = torch.randint(0, 10, size=(1, args.seq_len))
-    gpt2_model = GPTModel(args=args)
-    logits = gpt2_model(mock_data)
-    print(logits.shape)
+    # mock_data = torch.randint(0, 10, size=(1, args.seq_len))
+    # gpt2_model = GPTModel(args=args)
+    # logits = gpt2_model(mock_data)
+    # print(logits.shape)
 
+    # ================================= generate text
+    
+    torch.manual_seed(123)
+    model = GPTModel(args=args)
+    model.eval()
 
+    start_context = "Hello, I am"
+    tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
+    encoded_text = torch.tensor(tokenizer.encode(text=start_context)).unsqueeze(0)
+
+    print("Origin tokens: ", encoded_text)
+    print("Origin text: ", start_context)
+
+    output = generate_text_simple(
+        model = model,
+        input=encoded_text, 
+        max_new_tokens=args.max_new_tokens,
+        context_length=args.seq_len
+    )
+    decoded_text = tokenizer.decode(tokens=output.squeeze(0).tolist())
+    print("New tokens: ", output)
+    print("New text: ", decoded_text)
+
+# coding gpt2 from scratch
 if __name__ == "__main__":
     main()
