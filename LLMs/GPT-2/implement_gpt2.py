@@ -83,7 +83,7 @@ class GELU(nn.Module):
         ))
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, dropout: float = 0.05):
+    def __init__(self, d_model: int, num_heads: int, seq_len: int, dropout: float = 0.05,):
         super().__init__()
 
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
@@ -97,23 +97,26 @@ class MultiHeadAttention(nn.Module):
         self.Wo = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
 
         self.dropout = nn.Dropout(p=dropout)
+
+        self.mask =torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool()
+
     def split_heads(self, x: torch.Tensor):
         batch_size, seq_len, d_model = x.size()
         return x.view(batch_size, self.num_heads, seq_len, self.head_dim)
     
-    def scaled_dot_product_attention(self, Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask=None):
+    def scaled_dot_product_attention(self, Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor):
         matmul_QK = torch.matmul(Q, K.transpose(2, 3)) # [N, num_heads, seq_len, seq_len]
         dk = torch.tensor(K.size(-1), dtype=torch.float32)
         scaled_dot_product = matmul_QK / dk # [N, num_heads, seq_len, seq_len]
+        # masked 
+        scaled_dot_product = scaled_dot_product.masked_fill_(mask=self.mask, value=-torch.inf) 
 
-        if mask is not None:
-            scaled_dot_product = scaled_dot_product.masked_fill(mask == 0, -1e9)
         attention_weights = F.softmax(scaled_dot_product, dim=-1) # [N, num_heads, seq_len, seq_len]
         # [N, num_heads, seq_len, seq_len] @  [N, num_heads, seq_len, head_dim] = [N, num_heads, seq_len, head_dim]
         output = torch.matmul(attention_weights, V)
         return attention_weights, output
 
-    def forward(self, x: torch.Tensor, mask=None):
+    def forward(self, x: torch.Tensor):
         # x: [N, seq_len, d_model]
         batch_size, seq_len, d_model = x.size()
         # [N, seq_len, d_model] => [N, seq_len, d_model] => [N, num_heads, seq_len, head_dim]
@@ -121,7 +124,7 @@ class MultiHeadAttention(nn.Module):
         K = self.split_heads(self.Wk(x))
         V = self.split_heads(self.Wv(x))
 
-        attention_weights, output = self.scaled_dot_product_attention(Q, K, V, mask=mask)
+        attention_weights, output = self.scaled_dot_product_attention(Q, K, V)
         # [N, num_heads, seq_len, head_dim] => [N, seq_len, num_heads, head_dim] => [N, seq_len, d_model]
         output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
         A = self.Wo(output)
@@ -147,7 +150,8 @@ class TransformerBlock(nn.Module):
         self.attention = MultiHeadAttention(
             d_model=args.d_model, 
             num_heads=args.num_heads, 
-            dropout=args.drop_rate
+            dropout=args.drop_rate, 
+            seq_len=args.seq_len
         )
         self.ffn = FeedForward(args=args)
         self.norm1 = LayerNorm(embed_dim=args.d_model)
