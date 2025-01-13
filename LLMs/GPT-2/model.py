@@ -9,7 +9,7 @@ from dataclasses import dataclass
 @dataclass
 class GPTConfig124M:
     vocab_size: int = 50257
-    seq_len: int = 1024
+    context_length: int = 1024
     d_model:int =  768
     ff_dim: int = d_model * 4
     max_new_tokens: int = 10
@@ -72,7 +72,7 @@ class GELU(nn.Module):
         ))
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, seq_len: int, dropout: float = 0.05,):
+    def __init__(self, d_model: int, num_heads: int, dropout: float = 0.05,):
         super().__init__()
 
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
@@ -142,7 +142,6 @@ class TransformerBlock(nn.Module):
             d_model=args.d_model, 
             num_heads=args.num_heads, 
             dropout=args.drop_rate, 
-            seq_len=args.seq_len
         )
         self.ffn = FeedForward(args=args)
         self.norm1 = LayerNorm(embed_dim=args.d_model)
@@ -173,7 +172,7 @@ class GPTModel(nn.Module):
         self.args = args
         self.embedding = TokenAndPositionEmbedding(embed_dim=args.d_model, 
                                                    vocab_size=args.vocab_size,
-                                                   max_length=args.seq_len,
+                                                   max_length=args.context_length,
                                                    device=args.device)
         self.drop_embed = nn.Dropout(p=args.drop_rate)
         
@@ -198,7 +197,7 @@ class GPTModel(nn.Module):
 def generate_text_simple(model: GPTModel, 
                          input: torch.Tensor, 
                          max_new_tokens: int, 
-                         context_length: int):
+                         context_length: int) -> torch.Tensor:
     
     for _ in range(max_new_tokens):
         input_model= input[:, -context_length:] # [N, seq_len]
@@ -252,7 +251,7 @@ def main():
         model = model,
         input=encoded_text, 
         max_new_tokens=args.max_new_tokens,
-        context_length=args.seq_len
+        context_length=args.context_length
     )
     decoded_text = tokenizer.decode(tokens=output.squeeze(0).tolist())
     print("New tokens: ", output)

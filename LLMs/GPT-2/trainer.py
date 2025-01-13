@@ -12,13 +12,13 @@ from utils_data import (
     token_ids_to_text
 )
 from dataclasses import dataclass
-from model import GPTModel
+from model import GPTModel, generate_text_simple
 
 
 @dataclass
 class GPTConfig124M:
     vocab_size: int = 50257
-    seq_len: int = 1024
+    context_length: int = 1024
     d_model:int =  768
     ff_dim: int = d_model * 4
     max_new_tokens: int = 10
@@ -37,9 +37,22 @@ class GPTConfig124M:
 
 def generate_and_print_sample(model: GPTModel, 
                               tokenizer, 
-                              device, 
-                              start_context):
-    pass
+                              start_context: str, 
+                              context_length: int, 
+                              max_new_tokens: int):
+    model.eval()
+    encoded = text_to_tokens_ids(text=start_context, tokenizer=tokenizer)
+    with torch.no_grad():
+        new_tokens_ids = generate_text_simple(
+            model=model, 
+            input=encoded, 
+            max_new_tokens=max_new_tokens, 
+            context_length=context_length
+        )
+
+        decoded = token_ids_to_text(tokens_ids=new_tokens_ids.unsqueeze(0).tolist(),
+                                    tokenizer=tokenizer)
+        print("Text generate: ", decoded.replace("\n", " "))
 
 
 def trainer(model: GPTModel, 
@@ -105,10 +118,18 @@ def evaluater(model: GPTModel,
     return epoch_acc, epoch_loss
 
 
-def fit(model: GPTModel, criterion: nn.CrossEntropyLoss, 
-        optimizer: optim.AdamW, train_loader: DataLoader, 
-        val_loader: DataLoader, num_epochs: int, device: str, 
-        log_interval: int = 50, path_model: str = "./checkpoint"):
+def fit(args: GPTConfig124M,
+        start_context: str, 
+        tokenizer,
+        model: GPTModel, 
+        criterion: nn.CrossEntropyLoss, 
+        optimizer: optim.AdamW, 
+        train_loader: DataLoader, 
+        val_loader: DataLoader, 
+        num_epochs: int, 
+        device: str, 
+        log_interval: int = 50, 
+        path_model: str = "./checkpoint",):
     
     train_losses = []
     train_accuracies = []
@@ -153,6 +174,10 @@ def fit(model: GPTModel, criterion: nn.CrossEntropyLoss,
                 epoch, time.time() - epoch_start_time, train_acc, train_loss, eval_acc, eval_loss
             )
         )
+        generate_and_print_sample(model=model, 
+                                  tokenizer=tokenizer,
+                                  context_length=args.context_length, 
+                                  max_new_tokens=args.max_new_tokens)
         print("-" * 60)
 
     model.load_state_dict(torch.load(f=path_model, 
@@ -221,8 +246,8 @@ def main():
     val_loader = create_dataloader(
         text=data[split_idx:], 
         batch_size=args.batch_size,
-        max_len=args.seq_len, 
-        stride=args.seq_len, 
+        max_len=args.context_length, 
+        stride=args.context_length, 
         is_shuffle=False, 
         is_drop_last=False, 
     )
