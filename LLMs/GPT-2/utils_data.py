@@ -26,10 +26,16 @@ class GPTDataset(Dataset):
         return input_chunk, target_chunk
     
 
-def create_dataloader(text: str, batch_size: 4, max_len: int = 256, stride: int = 128, 
-                      is_shuffle = True, is_drop_last = True, num_workers: int = 2):
+def create_dataloader(text: str, 
+                      batch_size: 4, 
+                      max_len: int = 256, 
+                      stride: int = 128, 
+                      is_shuffle = True, 
+                      is_drop_last = True, 
+                      num_workers: int = 2):
     tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
-    dataset = GPTDataset(text=text, tokenizer=tokenizer, max_len=max_len, stride=stride)
+    dataset = GPTDataset(text=text, tokenizer=tokenizer, 
+                         max_len=max_len, stride=stride)
 
     dataloader = DataLoader(
         dataset=dataset, 
@@ -42,12 +48,12 @@ def create_dataloader(text: str, batch_size: 4, max_len: int = 256, stride: int 
 
 
 def text_to_tokens_ids(text: str, tokenizer) -> torch.Tensor:
-    tokens_ids = tokenizer.encode(text).unsqueeze(0) # add batch dimension
-    encoded_tensor = torch.tensor(data=tokens_ids, dtype=torch.long)
+    token_ids = torch.tensor(tokenizer.encode(text), dtype=torch.long) 
+    encoded_tensor = token_ids.unsqueeze(0) # add batch dimension
     return encoded_tensor
 
-def token_ids_to_text(tokens_ids, tokenizer) -> str:
-    flat = tokens_ids.squeeze(0)
+def token_ids_to_text(tokens_ids: torch.Tensor, tokenizer) -> str:
+    flat = tokens_ids.squeeze(0) # remove batch dimension
     text = tokenizer.decode(flat.tolist())
     return text
 

@@ -18,7 +18,7 @@ from model import GPTModel, generate_text_simple
 @dataclass
 class GPTConfig124M:
     vocab_size: int = 50257
-    context_length: int = 1024
+    context_length: int = 256
     d_model:int =  768
     ff_dim: int = d_model * 4
     max_new_tokens: int = 10
@@ -50,7 +50,7 @@ def generate_and_print_sample(model: GPTModel,
             context_length=context_length
         )
 
-        decoded = token_ids_to_text(tokens_ids=new_tokens_ids.unsqueeze(0).tolist(),
+        decoded = token_ids_to_text(tokens_ids=new_tokens_ids,
                                     tokenizer=tokenizer)
         print("Text generate: ", decoded.replace("\n", " "))
 
@@ -72,8 +72,10 @@ def trainer(model: GPTModel,
         labels = labels.to(device) # [N, sequence_len]
 
         optimizer.zero_grad()
-        output = model(sequences) # output: [N, vocab_size, sequence_len]
-        
+        # output: [N, vocab_size, sequence_len] => [N, vocab_size, seq_len]
+        output = model(sequences).permute(0, 2, 1) 
+        # print("shape output: ", output.shape) # [N, vocab_size, context_len]
+        # print("Shape label: ", labels.shape) # [N, context_len]
         loss = criterion(output, labels)
         train_loss += loss.item()
         train_acc += (torch.argmax(input=output, dim=1) == labels).sum().item()
@@ -95,9 +97,7 @@ def trainer(model: GPTModel,
 
 def evaluater(model: GPTModel, 
               criterion: nn.CrossEntropyLoss, 
-              optimizer: optim.AdamW, 
               val_loader: DataLoader, 
-              epoch: int, 
               device):
     model.eval()
     val_loss, val_acc, total = 0.0, 0.0, 0.0
@@ -106,7 +106,8 @@ def evaluater(model: GPTModel,
             sequences = sequences.to(device) # [N, sequence_len] 
             labels = labels.to(device) # [N, sequence_len]
 
-            output = model(sequences)
+            # output: [N, vocab_size, sequence_len] => [N, vocab_size, seq_len]
+            output = model(sequences).permute(0, 2, 1)
             loss = criterion(output, labels)
 
             val_loss += loss.item()
@@ -154,9 +155,7 @@ def fit(args: GPTConfig124M,
 
         eval_acc, eval_loss = evaluater(model=model, 
                                       criterion=criterion, 
-                                      optimizer=optimizer, 
                                       val_loader=val_loader, 
-                                      epoch=epoch, 
                                       device=device)
         valid_accuracies.append(eval_acc)
         valid_losses.append(eval_loss)
@@ -175,6 +174,7 @@ def fit(args: GPTConfig124M,
             )
         )
         generate_and_print_sample(model=model, 
+                                  start_context=start_context,
                                   tokenizer=tokenizer,
                                   context_length=args.context_length, 
                                   max_new_tokens=args.max_new_tokens)
@@ -218,7 +218,7 @@ def plot_result(num_epochs: int,
 
 def main():
     torch.manual_seed(123)
-    file_path = "the-verdict.txt"
+    file_path = "LLMs/GPT-2/the-verdict.txt"
 
     with open(file_path, mode="r", encoding="utf-8") as f:
         data = f.read()
@@ -230,15 +230,17 @@ def main():
                             lr=args.lr, 
                             weight_decay=args.weight_decay)
     criterion = nn.CrossEntropyLoss()
+    tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
 
     ################# setup data
     train_ratio = 0.9
     split_idx = int(train_ratio * len(data))
+
     train_loader = create_dataloader(
         text=data[:split_idx], 
         batch_size=args.batch_size,
-        max_len=args.seq_len, 
-        stride=args.seq_len, 
+        max_len=args.context_length, 
+        stride=args.context_length, 
         is_shuffle=True, 
         is_drop_last=True, 
     )
@@ -253,10 +255,17 @@ def main():
     )
 
     ################## training
-    model, results = fit(model=model, criterion=criterion, 
-        optimizer=optimizer, train_loader=train_loader, 
-        val_loader=val_loader, num_epochs=args.num_epochs, 
-        device=args.device)
+    start_context="Hello, I am"
+    model, results = fit(args=args, 
+                         start_context=start_context,
+                         tokenizer=tokenizer, 
+                         model=model, 
+                         criterion=criterion, 
+                         optimizer=optimizer, 
+                         train_loader=train_loader, 
+                         val_loader=val_loader, 
+                         num_epochs=args.num_epochs, 
+                         device=args.device)
     
     plot_result(num_epochs=args.num_epochs, 
                 train_accs=results['train_accuracies'], 

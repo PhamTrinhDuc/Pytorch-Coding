@@ -9,7 +9,7 @@ from dataclasses import dataclass
 @dataclass
 class GPTConfig124M:
     vocab_size: int = 50257
-    context_length: int = 1024
+    context_length: int = 256
     d_model:int =  768
     ff_dim: int = d_model * 4
     max_new_tokens: int = 10
