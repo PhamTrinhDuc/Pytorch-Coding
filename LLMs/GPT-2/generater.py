@@ -62,14 +62,14 @@ def temperature_sampling(logits, temperature):
     
     return chosen_index.item()
 
-def beam_search(logits_fn, beam_width: int, max_length: int):
+def beam_search(model, beam_width: int, max_length: int):
     beams = [([], 0)]  # (sequence, score)
     
     for _ in range(max_length):
         new_beams = []
         for seq, score in beams:
             # Tính logits cho chuỗi hiện tại
-            logits = logits_fn(seq)
+            logits = model(seq)
             probabilities = torch.softmax(logits, dim=-1)
             
             # Lấy top-k (beam_width) token
