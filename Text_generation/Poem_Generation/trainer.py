@@ -1,15 +1,14 @@
 import torch
 import pandas as pd
 import torch.nn as nn
-from Vectorization import Vocab
 from model import TransformersModel
-
+from utils_data import VocabularyBuilder, PoemDataset
 
 class Config:
     df = pd.read_csv("poem-datasets.csv")
-    vocab = Vocab(df)
-    vocab = vocab.build_vocab()
-
+    MAX_SEQ_LEN: int = 25
+    TRAIN_BATCH_SIZE: int = 256
+    vocab = VocabularyBuilder(df=df, max_seq_len=MAX_SEQ_LEN)
     VOCAB_SIZE = len(vocab)
     EMBEDDING_DIMS = 128
     HIDDEN_DIM = 128
@@ -30,13 +29,7 @@ model = TransformersModel(
 ).to(Config.DEVICE)
 
 
-input_tests = torch.randint(1, 10, (1, 10)).to(Config.DEVICE)
-with torch.no_grad():
-    output = model(input_tests)
-    print(output.shape)
-
-
-def training():
+def training(model, ):
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=Config.LR)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=1, gamma=0.95) # cập nhật lr = lr * 0.95 sau 1 epoch
