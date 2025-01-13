@@ -27,6 +27,7 @@ class GPTConfig124M:
     drop_rate:float =  0.05
     qkv_bias: bool = False
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    path_model: str = "LLMs/GPT-2/checkpoint"
 
     # ================
     lr: float = 5e-4
@@ -255,7 +256,7 @@ def main():
     )
 
     ################## training
-    start_context="Hello, I am"
+    start_context="Every effort moves you"
     model, results = fit(args=args, 
                          start_context=start_context,
                          tokenizer=tokenizer, 
@@ -265,14 +266,15 @@ def main():
                          train_loader=train_loader, 
                          val_loader=val_loader, 
                          num_epochs=args.num_epochs, 
-                         device=args.device)
+                         device=args.device, 
+                         path_model=args.path_model)
     
     plot_result(num_epochs=args.num_epochs, 
                 train_accs=results['train_accuracies'], 
                 val_accs=results['valid_accuracis'], 
                 train_losses=results['train_losses'], 
                 val_losses=results['valid_losses'], 
-                path_storage_result="./plot_results.png")
+                path_storage_result="LLMs/GPT-2/plot_results.png")
 
 if __name__ == "__main__":
     main()
