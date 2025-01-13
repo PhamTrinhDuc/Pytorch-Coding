@@ -12,6 +12,83 @@ def token_ids_to_text(tokens_ids: torch.Tensor, tokenizer) -> str:
     text = tokenizer.decode(flat.tolist())
     return text
 
+
+def top_k_sampling(logits: torch.Tensor, top_k: int):
+    # Lấy top_k token có xác suất cao nhất
+    top_logits, top_indices = torch.topk(input=logits, k=top_k)
+    
+    # Chuẩn hóa lại xác suất (softmax) trên top_k logits
+    probabilities = torch.softmax(top_logits, dim=-1)
+    
+    # Chọn ngẫu nhiên một token từ top_k
+    chosen_index = torch.multinomial(probabilities, num_samples=1)
+    
+    # Trả về token đã chọn
+    return top_indices[chosen_index].item()
+
+
+def top_p_sampling(logits: torch.Tensor, top_p: int):
+    # Sắp xếp các token theo xác suất giảm dần
+    sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+    sorted_probabilities = torch.softmax(sorted_logits, dim=-1)
+    
+    # Tính tổng tích lũy xác suất
+    cumulative_probabilities = torch.cumsum(sorted_probabilities, dim=-1)
+    
+    # Lấy token đầu tiên sao cho tổng xác suất >= top_p
+    cutoff_index = (cumulative_probabilities > top_p).nonzero(as_tuple=True)[0][0]
+    
+    # Chỉ giữ lại các token trong nhóm hạt nhân
+    top_indices = sorted_indices[:cutoff_index + 1]
+    top_logits = sorted_logits[:cutoff_index + 1]
+    
+    # Chuẩn hóa xác suất trên nhóm token được chọn
+    probabilities = torch.softmax(top_logits, dim=-1)
+    
+    # Chọn ngẫu nhiên một token
+    chosen_index = torch.multinomial(probabilities, num_samples=1)
+    
+    return top_indices[chosen_index].item()
+
+def temperature_sampling(logits, temperature):
+    # Chia logits cho temperature để điều chỉnh phân phối
+    adjusted_logits = logits / temperature
+    
+    # Tính xác suất softmax
+    probabilities = torch.softmax(adjusted_logits, dim=-1)
+    
+    # Chọn ngẫu nhiên một token dựa trên phân phối
+    chosen_index = torch.multinomial(probabilities, num_samples=1)
+    
+    return chosen_index.item()
+
+def beam_search(logits_fn, beam_width: int, max_length: int):
+    beams = [([], 0)]  # (sequence, score)
+    
+    for _ in range(max_length):
+        new_beams = []
+        for seq, score in beams:
+            # Tính logits cho chuỗi hiện tại
+            logits = logits_fn(seq)
+            probabilities = torch.softmax(logits, dim=-1)
+            
+            # Lấy top-k (beam_width) token
+            top_logits, top_indices = torch.topk(probabilities, k=beam_width)
+            
+            # Tạo các beam mới
+            for i in range(beam_width):
+                new_seq = seq + [top_indices[i].item()]
+                new_score = score + torch.log(top_logits[i]).item()
+                new_beams.append((new_seq, new_score))
+        
+        # Chỉ giữ lại các beam tốt nhất
+        new_beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_width]
+        beams = new_beams
+    
+    # Trả về beam tốt nhất
+    return beams[0][0]
+
+
 def generate(model: GPTModel, 
              input: list[int], 
              max_new_tokens: int,
@@ -37,6 +114,7 @@ def generate(model: GPTModel,
             logits = logits / temperature # [N, vocab_size]
 
             probs = torch.softmax(input=logits, dim=-1) # [N, vocab_size]
+            # choose random from top_k
             idx_next = torch.multinomial(input=probs, num_samples=1) # [N, 1]
         else:
             idx_next = torch.argmax(logits, dim=-1, keepdim=True)
