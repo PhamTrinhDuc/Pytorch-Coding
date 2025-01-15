@@ -1,1 +1,1 @@
-from book import Book, BookCreate, BookBase
+from .book import BookSchemas, BookCreate, BookBase

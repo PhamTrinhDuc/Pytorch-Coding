@@ -18,6 +18,7 @@ def get_db():
         # Attempt to connect to the database
         conn = engine.connect()
         conn.close() 
+        print("connect to database to sucessfull")
         yield db 
     except Exception as e:
         raise Exception(f"No active database connection: {e}") 

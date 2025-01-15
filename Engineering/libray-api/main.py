@@ -1,23 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import models, schemas
-from .database import get_db, engine
+from schemas import BookSchemas, BookCreate
+from models import Book
+from database import get_db, engine
 
 
-app = APIRouter()
+app = FastAPI()
 
-@app.post("/books/", response_model=schemas.Book)
-def create_book(book: schemas.BookCreate, 
+@app.get("/")
+def read_root():
+    return {"Hello": "World"}
+
+@app.post("/books", response_model=BookSchemas)
+def create_book(book: BookCreate, 
                 db: Session = Depends(get_db)):
-    db_book = models.Book(**book.dict())
+    print(f"Accessing /books/ endpoint")
+    db_book = Book(**book.dict())
     db.add(db_book)
     db.commit()
     db.refresh(db_book)
     return db_book
 
-@app.get("/books/", response_model=list[schemas.Book])
+
+@app.get("/books", response_model=list[BookSchemas])
 def read_books(skip: int = 0, limit: int = 100, 
                db: Session = Depends(get_db)):
-    books = db.query(models.Book).offset(skip).limit(limit)
+    books = db.query(Book).offset(skip).limit(limit)
     return books
 

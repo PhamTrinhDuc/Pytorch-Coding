@@ -8,10 +8,10 @@ class BookBase(BaseModel):
 class BookCreate(BookBase):
     pass 
 
-class Book(BookBase):
+class BookSchemas(BookBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
         

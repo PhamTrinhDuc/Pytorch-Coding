@@ -14,7 +14,7 @@ class Borrower(BorrowerBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class BorrowRecordBase(BaseModel):
@@ -30,4 +30,4 @@ class BorrowRecord(BorrowRecordBase):
     return_date: Optional[datetime] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
