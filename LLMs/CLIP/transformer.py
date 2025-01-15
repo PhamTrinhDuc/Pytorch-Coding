@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+
 class PositionalEmbedding(nn.Module):
     def __init__(self, d_model, max_seq_length):
         super().__init__()
@@ -21,6 +22,30 @@ class PositionalEmbedding(nn.Module):
         # x: [B, seq_len]
         seq_len = x.size(1)
         return x + self.pe[:, :seq_len]
+
+
+class TokenAndPositionEmbedding(nn.Module):
+    def __init__(self, 
+                 embed_dim: int, 
+                 vocab_size: int, 
+                 max_length: int):
+        super().__init__()
+        self.embed_model = nn.Embedding(
+            num_embeddings=vocab_size, 
+            embedding_dim=embed_dim
+        )
+
+        self.pos_embed = nn.Embedding(
+            num_embeddings=max_length,
+            embedding_dim=embed_dim
+        )
+
+    def forward(self, x: torch.Tensor):
+        N, seq_len = x.size() # [B, seq_len]
+        positions = torch.arange(0, seq_len).expand(N, seq_len).to(x.device) # [N, seq_len]
+        token_embed = self.embed_model(x) # [N, seq_len, embed_dim]
+        position_embed = self.pos_embed(positions) # [N, seq_len, embed_dim]
+        return token_embed + position_embed # [N, seq_len, embed_dim]
     
 
 class MultilHeadAttention(nn.Module):
