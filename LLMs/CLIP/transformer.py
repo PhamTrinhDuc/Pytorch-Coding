@@ -30,12 +30,12 @@ class TokenAndPositionEmbedding(nn.Module):
                  vocab_size: int, 
                  max_length: int):
         super().__init__()
-        self.embed_model = nn.Embedding(
+        self.embed_token_model = nn.Embedding(
             num_embeddings=vocab_size, 
             embedding_dim=embed_dim
         )
 
-        self.pos_embed = nn.Embedding(
+        self.embed_pos_model = nn.Embedding(
             num_embeddings=max_length,
             embedding_dim=embed_dim
         )
@@ -43,8 +43,8 @@ class TokenAndPositionEmbedding(nn.Module):
     def forward(self, x: torch.Tensor):
         N, seq_len = x.size() # [B, seq_len]
         positions = torch.arange(0, seq_len).expand(N, seq_len).to(x.device) # [N, seq_len]
-        token_embed = self.embed_model(x) # [N, seq_len, embed_dim]
-        position_embed = self.pos_embed(positions) # [N, seq_len, embed_dim]
+        token_embed = self.embed_token_model(x) # [N, seq_len, embed_dim]
+        position_embed = self.embed_pos_model(positions) # [N, seq_len, embed_dim]
         return token_embed + position_embed # [N, seq_len, embed_dim]
     
 

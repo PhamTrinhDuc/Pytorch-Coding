@@ -15,14 +15,14 @@ class TextEncoderConfig:
     n_layers: int = 4
     drop_rate: float = 0.05
 
-
 def tokenization(text: str, 
-              tokenizer,
-              encode: bool=True, 
-              mask=None, 
-              max_seq_length=32):
-    # Khởi tạo GPT-2 tokenizer
+                 tokenizer = None,
+                 encode: bool=True, 
+                 mask=None, 
+                 max_seq_length=32):
     
+    if tokenizer is None:
+        tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
     if encode:
         # Encode văn bản thành tokens
         tokens = tokenizer.encode(text)
