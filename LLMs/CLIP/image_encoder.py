@@ -2,18 +2,7 @@ import torch
 import torch.nn as nn
 from dataclasses import dataclass, asdict
 from transformer import TransformerEncoder, PositionalEmbedding
-
-@dataclass
-class ViTConfig:
-    d_model: int = 32
-    n_heads: int = 4 
-    n_layers: int = 8
-    ff_dim: int = 4 * d_model
-    drop_rate: float = 0.1
-    image_size: tuple = (128, 128)
-    patch_size: tuple = (8, 8) 
-    n_channels: int = 3
-    embedding_image: int = 128
+from config import ViTConfig
 
 
 class ViTEncoder(nn.Module):
@@ -50,7 +39,7 @@ class ViTEncoder(nn.Module):
         ])
         self.projection = nn.Parameter(torch.randn(d_model, embedding_image))
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor=None):
+    def forward(self, x: torch.Tensor):
         # [B, C, H, W] => (B, d_model, H//patch_size[0], W//patch_size[1])
         x = self.linear_proj(x)
         # (B, d_model, H//patch_size[0], W//patch_size[1]) => (B, d_model, dim2*dim3) => (B, dim2*dim3, d_model)
@@ -63,7 +52,7 @@ class ViTEncoder(nn.Module):
         
         x = self.positions_embedding(x) # [B, self.seq_len_patch, d_model]
         for layer in self.transformer_encoder_layers:
-            x = layer(x, mask) # [B, self.seq_len_patch, d_model]
+            x = layer(x) # [B, self.seq_len_patch, d_model]
         
         x = x[:, 0, :] # [B, d_model], get embedding of token CLS 
         if self.projection is not None:

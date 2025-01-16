@@ -3,17 +3,9 @@ import tiktoken
 import torch.nn as nn
 from dataclasses import dataclass, asdict
 from transformer import TransformerEncoder, TokenAndPositionEmbedding
+from config import TextEncoderConfig
 
-@dataclass
-class TextEncoderConfig:
-    vocab_size: int = -1 
-    d_model: int = 64
-    ff_dim: int = d_model * 4
-    max_seq_len: int = 128
-    embedding_image: int = 128
-    n_heads: int = 8
-    n_layers: int = 4
-    drop_rate: float = 0.05
+
 
 def tokenization(text: str, 
                  tokenizer = None,
@@ -39,7 +31,7 @@ def tokenization(text: str,
         out = torch.tensor(tokens, dtype=torch.long)
         
         # Tạo attention mask
-        mask = torch.ones(len(out))
+        mask = torch.ones(len(out) + 1)
         
         # Pad tokens nếu cần thiết
         if len(out) < max_seq_length:
@@ -80,7 +72,7 @@ class TextEncoder(nn.Module):
 
         self.projection = nn.Parameter(torch.randn(d_model, embedding_image))
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor=None):
+    def forward(self, x: torch.LongTensor, mask: torch.Tensor=None):
         # x: [B, max_seq_len]
         embedding = self.embed_model(x) # [B, max_seq_len, d_model]
         # embed_pos = self.embed_pos(x) # [B, max_seq_len, d_model]
@@ -102,11 +94,43 @@ class TextEncoder(nn.Module):
 class TextEncoderRetrieval(nn.Module):
     def __init__(self, vocab_size: int, d_model: int, 
                  max_seq_len: int, n_layers: int, 
-                 n_heas: int, embedding_image: int):
+                 n_heads: int, embedding_image: int, 
+                 ff_dim: int, drop_rate: int):
         super().__init__()
+        self.max_seq_len = max_seq_len + 1
+        self.embed_model = TokenAndPositionEmbedding(embed_dim=d_model, 
+                                                     vocab_size=vocab_size, 
+                                                     max_length=max_seq_len)
 
-    def forward(self, x):
-        pass
+        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model), requires_grad=True)
+
+        self.transformer_enc_layers = nn.ModuleList([
+            TransformerEncoder(d_model=d_model, num_heads=n_heads, 
+                               ff_dim=ff_dim, drop_rate=drop_rate)
+            for _ in range(n_layers)
+        ])
+
+        self.projection = nn.Parameter(torch.randn(d_model, embedding_image))
+
+    def forward(self, tokens: torch.LongTensor, mask=None):
+        # tokens: [B, max_seq_len]
+        embedding = self.embed_model(tokens) # [B, max_seq_len, embed_dim]
+
+        for encoder_layer in self.transformer_enc_layers:
+            output = encoder_layer(embedding, mask)
+        
+        if mask is not None:
+            # Get the lengths of each sequence (i.e., find the last non-padded token)
+            idx_seq_len = mask.sum(dim=-1) - 1 # Subtract 1 to get the index
+            output = output[torch.arange(tokens.shape[0]), idx_seq_len]
+        
+        else:
+            output = output[:, -1] # If no mask is provided, take the last token in the sequence.
+        
+        output = output @ self.projection
+        
+        output = output / torch.norm(output, dim=-1, keepdim=True)
+        return output # [B, embedding_image]
 
 
 def main():

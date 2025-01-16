@@ -86,22 +86,24 @@ class MultilHeadAttention(nn.Module):
 
         scaled_dot_product = matmul_QK / dk # [B, num_heads, seq_len, seq_len]
         if mask is not None:
-            scaled_dot_product.masked_fill_(mask=mask, value=-torch.inf) # [B, num_heads, seq_len, seq_len]
+            print("dot product: ", scaled_dot_product.shape)
+            print("mask: ", mask.shape)
+            scaled_dot_product.masked_fill(mask== 0, value=-torch.inf) # [B, num_heads, seq_len, seq_len]
 
         attention_scores = nn.functional.softmax(scaled_dot_product, dim=-1) # [B, num_heads, seq_len, seq_len]
         
-        # [B, num_heads, seq_len, seq_len] @ [B, num_heads, seq_len, head_dim] = [b, num_heads, seq_len, head_dim]
+        # [B, num_heads, seq_len, seq_len] @ [B, num_heads, seq_len, head_dim] = [B, num_heads, seq_len, head_dim]
         outputs = torch.matmul(attention_scores, V)
         return outputs, attention_scores
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor=None):
 
         batch_size, seq_len, d_model = x.size()
-        # [B, seq_len, d_model] => [B, seq_len, qqkv_dim] => [B, num_heads, seq_len, ]
+        # [B, seq_len, d_model] => [B, seq_len, qkv_dim] => [B, num_heads, seq_len, ]
         # divide Q, K, V by the heads after giving the classes Wk, Wq, Wo
-        Q = self.split_heads(self.WQ(x)) # [B, num_heads, seq_leB, head_dim]
-        K = self.split_heads(self.WK(x)) # [B, num_heads, seq_leB, head_dim]
-        V = self.split_heads(self.WO(x)) # [B, num_heads, seq_leB, head_dim]
+        Q = self.split_heads(self.WQ(x)) # [B, num_heads, seq_len, head_dim]
+        K = self.split_heads(self.WK(x)) # [B, num_heads, seq_len, head_dim]
+        V = self.split_heads(self.WO(x)) # [B, num_heads, seq_len, head_dim]
 
         # mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool()[:seq_len, :seq_len]
 
