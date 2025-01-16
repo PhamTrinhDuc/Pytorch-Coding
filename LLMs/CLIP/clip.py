@@ -39,17 +39,17 @@ def CLIPLoss(logits: torch.Tensor, labels: torch.Tensor):
 
         >>>> Examples
         logits = [
-            [0.9, 0.2, 0.1],  # point corresponds of image1 with text1, text2, text3
-            [0.1, 0.8, 0.3],  # point corresponds of image2 with text1, text2, text3 
-            [0.2, 0.1, 0.7]   # point corresponds of image3 with text1, text2, text3
+            [0.9, 0.2, 0.1],   point corresponds of image1 with text1, text2, text3
+            [0.1, 0.8, 0.3],   point corresponds of image2 with text1, text2, text3 
+            [0.2, 0.1, 0.7]    point corresponds of image3 with text1, text2, text3
         ]
         labels = [0, 1, 2] # indicates that image1 matches text1, image2 matches text2, image3 matches text3
         
         >>>> Apply Softmax function
         probabilities = [
-            [0.6, 0.2, 0.2],  # probability of image1 matching each text
-            [0.2, 0.6, 0.2],  # probability of image2 matching each text
-            [0.2, 0.2, 0.6]   # probability of image3 matching each text
+            [0.6, 0.2, 0.2],   probability of image1 matching each text
+            [0.2, 0.6, 0.2],   probability of image2 matching each text
+            [0.2, 0.2, 0.6]    probability of image3 matching each text
         ]
 
         >>>> Caculate cross entropy:

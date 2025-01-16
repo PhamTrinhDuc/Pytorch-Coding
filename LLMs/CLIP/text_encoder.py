@@ -75,8 +75,6 @@ class TextEncoder(nn.Module):
     def forward(self, x: torch.LongTensor, mask: torch.Tensor=None):
         # x: [B, max_seq_len]
         embedding = self.embed_model(x) # [B, max_seq_len, d_model]
-        # embed_pos = self.embed_pos(x) # [B, max_seq_len, d_model]
-        # embedding = embed_token + embed_pos # [B, max_seq_len, d_model]
 
         # [1, 1, d_model] => [B, 1, d_model] concat [B, seq-len, d_model] => [B, self.max_seq_len, d_model]
         # add token cls to head embedding

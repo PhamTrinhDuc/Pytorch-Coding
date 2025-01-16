@@ -86,8 +86,9 @@ class MultilHeadAttention(nn.Module):
 
         scaled_dot_product = matmul_QK / dk # [B, num_heads, seq_len, seq_len]
         if mask is not None:
-            print("dot product: ", scaled_dot_product.shape)
-            print("mask: ", mask.shape)
+            mask = mask[:, None, None]
+            # print("dot product: ", scaled_dot_product.shape)
+            # print("mask: ", mask.shape)
             scaled_dot_product.masked_fill(mask== 0, value=-torch.inf) # [B, num_heads, seq_len, seq_len]
 
         attention_scores = nn.functional.softmax(scaled_dot_product, dim=-1) # [B, num_heads, seq_len, seq_len]

@@ -11,9 +11,7 @@ def train_epoch(model: nn.Module,
                 optimizer: torch.optim.AdamW, 
                 criterion: callable, 
                 train_loader: DataLoader, 
-                device: str, 
-                epoch: int, 
-                log_interval: int = 50):
+                device: str):
     train_loss = 0.0
     model.train()
     for idx, (sample) in enumerate(train_loader):
@@ -83,8 +81,7 @@ def fit(model: nn.Module,
                                             optimizer=optimizer, 
                                             criterion=criterion, 
                                             train_loader=train_loader, 
-                                            device=device, 
-                                            epoch=epoch)
+                                            device=device)
         train_losses.append(train_loss)
 
         # evaluate
