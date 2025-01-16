@@ -15,6 +15,7 @@ __pycache__/
 
 data
 my_working
+checkpoint.pth
 
 # Distribution / packaging
 .Python
