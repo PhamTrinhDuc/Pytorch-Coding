@@ -27,7 +27,7 @@ class TextEncoderConfig:
     vocab_size: int = 50257 # vocab of tokenizer gpt2
     d_model: int = 64
     ff_dim: int = d_model * 4
-    max_seq_len: int = 32
+    max_seq_len: int = 33 # 32 + 1 token CLS
     embedding_image: int = 128
     n_heads: int = 8
     n_layers: int = 4

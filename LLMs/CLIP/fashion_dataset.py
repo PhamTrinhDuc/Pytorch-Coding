@@ -93,6 +93,7 @@ def create_dataloader(data_path: str,
                                  target_size=target_size)
     test_dataset = FashionDataset(data_frame=val_df, tokenizer=tokenization, 
                                   target_size=target_size)
+    
     # create data loader
     train_loader = DataLoader(train_dataset, batch_size=batch_size, 
                               num_workers=2, shuffle=True)
@@ -118,6 +119,7 @@ def main():
     train_loader, val_loader, test_loader = create_dataloader(
         **asdict(ConfigDataset())
     )
+
     data = next(iter(train_loader))
     print(data['image'].shape) # [B, C, H, W]
     print(data['caption'].shape) # [B, seq_len]

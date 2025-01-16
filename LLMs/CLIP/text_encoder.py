@@ -11,7 +11,7 @@ def tokenization(text: str,
                  tokenizer = None,
                  encode: bool=True, 
                  mask=None, 
-                 max_seq_length=32):
+                 max_seq_length: int = 33):
     
     if tokenizer is None:
         tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
@@ -31,7 +31,7 @@ def tokenization(text: str,
         out = torch.tensor(tokens, dtype=torch.long)
         
         # Tạo attention mask
-        mask = torch.ones(len(out) + 1)
+        mask = torch.ones(len(out))
         
         # Pad tokens nếu cần thiết
         if len(out) < max_seq_length:
@@ -57,7 +57,7 @@ class TextEncoder(nn.Module):
                  embedding_image: int, ff_dim: int, 
                  drop_rate: float = 0.1):
         super().__init__()
-        self.max_seq_len = max_seq_len + 1
+        self.max_seq_len = max_seq_len - 1 # pass token CLS to add token CLS to embedding
         self.embed_model = TokenAndPositionEmbedding(embed_dim=d_model, 
                                                      vocab_size=vocab_size, 
                                                      max_length=max_seq_len)
