@@ -8,7 +8,7 @@ class SelfAttention(nn.Module):
     def __init__(self, num_heads: int, d_model: int):
         super().__init__()
         self.num_heads = num_heads
-        assert d_model % num_heads != 0, "d_model must be division num_heads"
+        assert d_model % num_heads != 0, "d_model must be divisible by num_heads"
         self.head_dim = d_model // num_heads
 
         self.Wq = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
