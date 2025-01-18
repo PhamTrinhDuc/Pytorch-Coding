@@ -8,6 +8,7 @@ class SelfAttention(nn.Module):
     def __init__(self, num_heads: int, d_model: int):
         super().__init__()
         self.num_heads = num_heads
+        assert d_model % num_heads != 0, "d_model must be division num_heads"
         self.head_dim = d_model // num_heads
 
         self.Wq = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
@@ -24,7 +25,7 @@ class SelfAttention(nn.Module):
                                      K: torch.Tensor, 
                                      V: torch.Tensor, 
                                      causal_mask: bool=False):
-        
+        # [B, num_heads, seq_len, d_model] @ [B, num_heads, d_model, seq_len] = [B, num_heads, seq_len, seq_len]
         matmul_QK = torch.matmul(Q, K.transpose(-2, -1)) # [B, num_heads, seq_len, seq_len]
 
         scaled_dot_product = matmul_QK / self.head_dim # [B, num_heads, seq_len, seq_len]
