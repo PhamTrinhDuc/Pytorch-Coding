@@ -36,9 +36,9 @@ class DecoderBlock(nn.Module):
 
 class VaeDecoder(nn.Module):
     def __init__(self, 
+                 out_decode: int,
                  in_decode: int=4, 
                  hidden_decode: int=512,
-                 out_decode: int=3, 
                  num_groups: int=32):
         super().__init__()
 
@@ -103,7 +103,6 @@ class VaeDecoder(nn.Module):
         # [B, in_decode, H//8, W//8] => [B, out_decode, H, W]
         for module in self.layers:
             x = module(x)
-            print("x: ", x.shape)
         return x # [B, out_decode, H, W]
     
 def main():

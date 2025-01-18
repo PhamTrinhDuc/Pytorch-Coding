@@ -33,6 +33,7 @@ class VaeEncoder(nn.Sequential):
                  hidden_encode: int=128, 
                  out_encode: int=4,
                  num_groups: int = 32):
+        self.out_encode = out_encode
         super().__init__(
             # [B, 3, H, W] => [B, hidden_encode, H, W] 
             BlockEncoder(in_channels=in_encode, 
@@ -76,23 +77,24 @@ class VaeEncoder(nn.Sequential):
             nn.GroupNorm(num_groups=num_groups, num_channels=hidden_encode*4),
             # [B, hidden_encode*4, H//8, W//8] => [B, hidden_encode*4, H//8, W//8]
             nn.SiLU(),
-            # [B, hidden_encode*4, H//8, W//8] => [B, out_channels*2, H//8, W//8]
+            # [B, hidden_encode*4, H//8, W//8] => [B, out_encode*2, H//8, W//8]
             nn.Conv2d(in_channels=hidden_encode*4, 
                       out_channels=out_encode*2, 
                       kernel_size=3, 
                       stride=1, 
                       padding=1),
-            # # [B, out_channels*2, H//8, W//8] => [B, out_channels*2, H//8, W//8]
-            # nn.Conv2d(in_channels=out_channels*2, 
-            #           out_channels=out_channels*2, 
-            #           kernel_size=1, 
-            #           padding=0, 
-            #           stride=1)
+            # [B, out_encode*2, H//8, W//8] => [B, out_encode*2, H//8, W//8]
+            nn.Conv2d(in_channels=out_encode*2, 
+                      out_channels=out_encode*2, 
+                      kernel_size=1, 
+                      padding=0, 
+                      stride=1)
         )
     
-    def forward(self, x: torch.Tensor, noise: torch.Tensor):
+    def forward(self, x: torch.Tensor):
         # x: (B, in_channels, H, W)
-        # noise: (B, out_channels//2, H//8, W//8)
+        # noise: (B, out_encode//2, H//8, W//8)
+        B, C, H, W = x.size()
 
         for module in self:
             if getattr(module, "stride", None) == 2:
@@ -101,22 +103,23 @@ class VaeEncoder(nn.Sequential):
                 # to ensure say after going through the module the image shape is [H/2, W/2]
                 x = F.pad(x, (0, 1, 0, 1))
             x = module(x)
-            print("x: ", x.shape)
-        # [B, out_channels*2, H//8, W//8] => 2 tensors [B, out_channels, H//8, W//8]
+
+        # [B, out_encode*2, H//8, W//8] => 2 tensors [B, out_encode, H//8, W//8]
         mean, log_variance = torch.chunk(input=x, chunks=2, dim=1)
         # Clamp the log variance between -30 and 20, so that the variance is between (circa) 1e-14 and 1e8. 
-        # [B, out_channels, H//8, W//8] => [B, out_channels, H//8, W//8]
+        # [B, out_encode, H//8, W//8] => [B, out_encode, H//8, W//8]
         log_variance = torch.clamp(log_variance, -30, 20)
-        # (B, out_channels, H//8, W//8) -> (B, out_channels, H//8, W//8)
+        # (B, out_encode, H//8, W//8) -> (B, out_encode, H//8, W//8)
         variance = log_variance.exp()
-        # (B, out_channels, H//8, W//8) -> (B, out_channels, H//8, W//8)
+        # (B, out_encode, H//8, W//8) -> (B, out_encode, H//8, W//8)
         stdev = variance.sqrt()
 
         # Transform N(0, 1) -> N(mean, stdev) 
-        # (B, out_channels, H//8, W//8) -> (B, out_channels, H//8, W//8)
+        noise = torch.randn(size=(B, self.out_encode, H//8, W//8))
+        # (B, out_encode, H//8, W//8) -> (B, out_encode, H//8, W//8)
         x = mean + stdev * noise
         # Scale by a constant
-        return x * 0.18125
+        return x * 0.18125, mean, log_variance
     
 
 def main():
@@ -127,12 +130,11 @@ def main():
     W_image = H_image = 224
     num_groups = 32
     data = torch.randn((batch_size, in_channels, W_image, H_image))
-    noise = torch.randn((batch_size, out_channels, W_image//8, H_image//8))
     encoder = VaeEncoder(in_encode=in_channels,
                          hidden_encode=hidden_channels, 
                          out_encode=out_channels, 
                          num_groups=num_groups)
-    output = encoder(data, noise)
+    output, *_ = encoder(data)
     print(output.shape)
 
 if __name__ == "__main__":
