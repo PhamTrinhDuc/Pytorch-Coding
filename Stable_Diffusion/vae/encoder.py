@@ -12,12 +12,13 @@ class BlockEncoder(nn.Module):
                  stride: int, 
                  padding: int):
         super().__init__()
+        self.stride = stride # for getattr 
         self.conv1 = nn.Conv2d(in_channels=in_channels, 
                                out_channels=out_channels, 
                                kernel_size=kernel_size, 
                                stride=stride, 
                                padding=padding)
-        self.residual = VAEResidualBlock(in_channels=in_channels, output_channels=out_channels)
+        self.residual = VAEResidualBlock(in_channels=out_channels, output_channels=out_channels)
 
     def forward(self, x):
         # [B, in_channels, H, W] => [B, out_channels, H, W] 
@@ -27,88 +28,110 @@ class BlockEncoder(nn.Module):
         return x
 
 class VaeEncoder(nn.Sequential):
-    def __init__(self, in_channels: int=3, out_channels: int=128, num_groups: int=32):
+    def __init__(self,
+                 in_encode: int, 
+                 hidden_encode: int=128, 
+                 out_encode: int=4,
+                 num_groups: int = 32):
         super().__init__(
-            # [B, 3, H, W] => [B, 128, H, W] 
-            BlockEncoder(in_channels=in_channels, 
-                         out_channels=out_channels, 
+            # [B, 3, H, W] => [B, hidden_encode, H, W] 
+            BlockEncoder(in_channels=in_encode, 
+                         out_channels=hidden_encode, 
                          kernel_size=3, 
                          stride=1, 
                          padding=1),
-            # [B, 128, H, W] => [B, 128, H//2, W//2]
-            BlockEncoder(in_channels=out_channels, 
-                         out_channels=out_channels*2, 
+            # [B, hidden_encode, H, W] => [B, hidden_encode*2, H//2, W//2]
+            BlockEncoder(in_channels=hidden_encode, 
+                         out_channels=hidden_encode*2, 
                          kernel_size=3, 
                          stride=2, 
                          padding=0),
-            # [B, 256, H//2, W//2] => [B, 512, H//4, W//4]
-            BlockEncoder(in_channels=out_channels*2, 
-                         out_channels=out_channels*3, 
+            # [B, hidden_encode*2, H//2, W//2] => [B, hidden_encode*4, H//4, W//4]
+            BlockEncoder(in_channels=hidden_encode*2, 
+                         out_channels=hidden_encode*4, 
                          kernel_size=3, 
                          stride=2, 
                          padding=0),
-            # [B, 512, H//4, W//4] => [B, 512, H//8, W//8]
-            BlockEncoder(in_channels=out_channels*3, 
-                         out_channels=out_channels*3, 
+            # [B, hidden_encode*4, H//4, W//4] => [B, hidden_encode*4, H//8, W//8]
+            BlockEncoder(in_channels=hidden_encode*4, 
+                         out_channels=hidden_encode*4, 
                          kernel_size=3, 
                          stride=2, 
                          padding=0),
-            # [B, 512, H//8, W//8] => [B, 512, H//8, W//8]
-            VAEResidualBlock(in_channels=out_channels*3, 
-                             output_channels=out_channels*3, 
+            # [B, hidden_encode*4, H//8, W//8] => [B, hidden_encode*4, H//8, W//8]
+            VAEResidualBlock(in_channels=hidden_encode*4, 
+                             output_channels=hidden_encode*4, 
                              kernel_size=3, 
                              stride=1, 
                              padding=1),
-            # [B, 512, H//8, W//8] => [B, 512, H//8, W//8]
-            VAEAttentionBlock(channels=out_channels*3),
-            # [B, 512, H//8, W//8] => [B, 512, H//8, W//8]
-            VAEResidualBlock(in_channels=out_channels*3, 
-                             output_channels=out_channels*3, 
+            # [B, hidden_encode*4, H//8, W//8] => [B, hidden_encode*4, H//8, W//8]
+            VAEAttentionBlock(channels=hidden_encode*4),
+            # [B, hidden_encode*4, H//8, W//8] => [B, hidden_encode*4, H//8, W//8]
+            VAEResidualBlock(in_channels=hidden_encode*4, 
+                             output_channels=hidden_encode*4, 
                              kernel_size=3, 
                              stride=1, 
                              padding=1),
-            # [B, 512, H//8, W//8] => [B, 512, H//8, W//8]
-            nn.GroupNorm(num_groups=num_groups, num_channels=out_channels*3),
+            # [B, hidden_encode*4, H//8, W//8] => [B, hidden_encode*4, H//8, W//8]
+            nn.GroupNorm(num_groups=num_groups, num_channels=hidden_encode*4),
+            # [B, hidden_encode*4, H//8, W//8] => [B, hidden_encode*4, H//8, W//8]
             nn.SiLU(),
-            # [B, 512, H//8, W//8] => [B, 8, H//8, W//8]
-            nn.Conv2d(in_channels=512, out_channels=8, kernel_size=3, stride=1, padding=1),
-            # [B, 8, H//8, W//8] => [B, 8, H//8, W//8]
-            nn.Conv2d(in_channels=8, out_channels=8, kernel_size=1, padding=0, stride=1)
+            # [B, hidden_encode*4, H//8, W//8] => [B, out_channels*2, H//8, W//8]
+            nn.Conv2d(in_channels=hidden_encode*4, 
+                      out_channels=out_encode*2, 
+                      kernel_size=3, 
+                      stride=1, 
+                      padding=1),
+            # # [B, out_channels*2, H//8, W//8] => [B, out_channels*2, H//8, W//8]
+            # nn.Conv2d(in_channels=out_channels*2, 
+            #           out_channels=out_channels*2, 
+            #           kernel_size=1, 
+            #           padding=0, 
+            #           stride=1)
         )
     
     def forward(self, x: torch.Tensor, noise: torch.Tensor):
-        # x: (B, C, H, W)
-        # noise: (B, 4, H / 8, W / 8)
+        # x: (B, in_channels, H, W)
+        # noise: (B, out_channels//2, H//8, W//8)
 
         for module in self:
-            if getattr(module, "stride", None) == (2, 2):
+            if getattr(module, "stride", None) == 2:
                 # The image shape after passing through the module will be reduced to [(H/2)-1, (W/2)-1], 
                 # so before passing through the module, we will add 1 to H and W in the lower right corner 
                 # to ensure say after going through the module the image shape is [H/2, W/2]
                 x = F.pad(x, (0, 1, 0, 1))
             x = module(x)
-
-        # [B, 8, H//8, W//8] => 2 tensors [B, 4, H//8, W//8]
+            print("x: ", x.shape)
+        # [B, out_channels*2, H//8, W//8] => 2 tensors [B, out_channels, H//8, W//8]
         mean, log_variance = torch.chunk(input=x, chunks=2, dim=1)
         # Clamp the log variance between -30 and 20, so that the variance is between (circa) 1e-14 and 1e8. 
-        # [B, 4, H//8, W//8] => [B, 4, H//8, W//8]
+        # [B, out_channels, H//8, W//8] => [B, out_channels, H//8, W//8]
         log_variance = torch.clamp(log_variance, -30, 20)
-        # (B, 4, H//8, W//8) -> (B, 4, H//8, W//8)
+        # (B, out_channels, H//8, W//8) -> (B, out_channels, H//8, W//8)
         variance = log_variance.exp()
-        # (B, 4, H//8, W//8) -> (B, 4, H//8, W//8)
+        # (B, out_channels, H//8, W//8) -> (B, out_channels, H//8, W//8)
         stdev = variance.sqrt()
 
         # Transform N(0, 1) -> N(mean, stdev) 
-        # (Batch_Size, 4, Height / 8, Width / 8) -> (Batch_Size, 4, Height / 8, Width / 8)
+        # (B, out_channels, H//8, W//8) -> (B, out_channels, H//8, W//8)
         x = mean + stdev * noise
         # Scale by a constant
         return x * 0.18125
     
 
 def main():
-    data = torch.randn((1, 3, 224, 224))
-    noise = torch.randn((1, 8, 224//8, 224//8))
-    encoder = VaeEncoder(in_channels=3, out_channels=128)
+    batch_size = 1
+    in_channels = 3
+    hidden_channels = 128
+    out_channels = 4
+    W_image = H_image = 224
+    num_groups = 32
+    data = torch.randn((batch_size, in_channels, W_image, H_image))
+    noise = torch.randn((batch_size, out_channels, W_image//8, H_image//8))
+    encoder = VaeEncoder(in_encode=in_channels,
+                         hidden_encode=hidden_channels, 
+                         out_encode=out_channels, 
+                         num_groups=num_groups)
     output = encoder(data, noise)
     print(output.shape)
 

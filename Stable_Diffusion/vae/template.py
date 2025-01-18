@@ -66,7 +66,8 @@ class VAEResidualBlock(nn.Module):
                  stride: int = 1, 
                  dilation: int = 1):
         super().__init__()
-        self.groupnorm1 = nn.GroupNorm(num_groups=num_groupnorm, num_channels=in_channels)          
+        self.groupnorm1 = nn.GroupNorm(num_groups=num_groupnorm, 
+                                       num_channels=in_channels)          
 
         self.conv1 = nn.Conv2d(in_channels=in_channels, 
                                out_channels=output_channels,
@@ -75,7 +76,8 @@ class VAEResidualBlock(nn.Module):
                                stride=stride, 
                                dilation=dilation)
         
-        self.groupnorm2 = nn.GroupNorm(num_groups=num_groupnorm, num_channels=output_channels)          
+        self.groupnorm2 = nn.GroupNorm(num_groups=num_groupnorm, 
+                                       num_channels=output_channels)          
         self.conv2 = nn.Conv2d(in_channels=output_channels, 
                                out_channels=output_channels,
                                kernel_size=kernel_size,
@@ -112,8 +114,10 @@ class VAEResidualBlock(nn.Module):
 class VAEAttentionBlock(nn.Module):
     def __init__(self, channels: int, num_heads: int = 2, num_groupnorms: int=32):
         super().__init__()
-        self.groupnorm = nn.GroupNorm(num_channels=channels, num_groups=num_groupnorms)
-        self.attention = SelfAttention(num_heads=num_heads, d_model=channels)
+        self.groupnorm = nn.GroupNorm(num_channels=channels, 
+                                      num_groups=num_groupnorms)
+        self.attention = SelfAttention(num_heads=num_heads, 
+                                       d_model=channels)
 
     def forward(self, x: torch.Tensor):
         # shape x: [B, C, H, W]
