@@ -103,7 +103,7 @@ class CrossAttention(nn.Module):
 
         # [B, num_heads_dim_Q] => [B, num_heads_dim_Q]
         output = self.Wo(output)
-        return output # [B, num_heads_dim_Q]
+        return output # [B, num_heads, dim_Q]
 
 
 
