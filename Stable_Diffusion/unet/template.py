@@ -68,7 +68,7 @@ class UnetResidualBlock(nn.Module):
     
 
 class UnetAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, num_heads: int=1, num_groups: int=32):
+    def __init__(self, d_model: int, num_heads: int=1, num_groups: int=32, d_context: int=768):
         super().__init__()
         self.channels= d_model * num_heads
 
@@ -86,7 +86,7 @@ class UnetAttentionBlock(nn.Module):
         self.layernorm2 = nn.LayerNorm(normalized_shape=self.channels)
         self.cross_attn = CrossAttention(num_heads=num_heads, 
                                          dim_Q=d_model, 
-                                         dim_KV=d_model)
+                                         dim_KV=d_context)
         self.layernorm3 = nn.LayerNorm(normalized_shape=self.channels)
 
         self.linear1 = nn.Linear(in_features=self.channels, 
