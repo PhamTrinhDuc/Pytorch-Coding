@@ -92,9 +92,9 @@ class CrossAttention(nn.Module):
 
         # [B, seq_len_Q, dim_Q] => [B, seq_len_Q, dim_Q] => [B, num_heads, seq_len_Q, head_dim]
         Q = self.split_heads(self.Wq(x_q))
-        # [B, seq_len_Q, dim_Q] => [B, seq_len_KV, dim_Q] => [B, num_heads, seq_len_KV, head_dim]
+        # [B, seq_len_KV, dim_KV] => [B, seq_len_KV, dim_Q] => [B, num_heads, seq_len_KV, head_dim]
         K = self.split_heads(self.Wk(x_kv))
-        # [B, seq_len_Q, dim_Q] => [B, seq_len_KV, dim_Q] => [B, num_heads, seq_len_KV, head_dim]
+        # [B, seq_len_KV, dim_KV] => [B, seq_len_KV, dim_Q] => [B, num_heads, seq_len_KV, head_dim]
         V = self.split_heads(self.Wv(x_kv))
 
         output, attention_scores = self.scaled_dot_product_attention(Q, K, V)
@@ -108,17 +108,25 @@ class CrossAttention(nn.Module):
 
 
 def main():
+    # x : torch.Size([1, 1024, 640])
+    # context:  torch.Size([1, 77, 320])
+
     batch_size = 32
-    seq_len = 1024
-    d_model = d_cross = 768
+    seq_len_Q = 1024
+    seq_len_KV = 77
+    d_model = 640
+    d_cross = 320
     num_heads = 4
     self_attention = SelfAttention(d_model=d_model, num_heads=num_heads)
     cross_attention = CrossAttention(num_heads=num_heads, dim_Q=d_model, dim_KV=d_cross)
 
-    mock_data = torch.randn(size=(batch_size, seq_len, d_model))
+    mock_data = torch.randn(size=(batch_size, seq_len_Q, d_model))
+    context = torch.randn(size=(batch_size, seq_len_KV, d_cross))
+    
     output_self_attention = self_attention(mock_data)
     print("Shape output self attention: ", output_self_attention.size())
-    output_cross_attention = cross_attention(mock_data, mock_data)
+
+    output_cross_attention = cross_attention(mock_data, context)
     print("Shape output cross attention: ", output_cross_attention.size())
 
 if __name__ == "__main__":
