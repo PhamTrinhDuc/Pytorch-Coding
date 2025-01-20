@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-from attention import SelfAttention, CrossAttention
+from template import UnetAttentionBlock, UnetResidualBlock
+
 
 class TimeEmbedding(nn.Module):
     def __init__(self, d_model: int):
@@ -21,103 +22,160 @@ class TimeEmbedding(nn.Module):
         x = self.linear2(x)
         return x
 
-class UnetResidualBlock(nn.Module):
-    def __init__(self, 
-                 in_channels: int, 
-                 out_channels: int, 
-                 num_groups: int = 32,
-                 n_times: int=1280):
-        super().__init__()
-        self.groupnorm_feature = nn.GroupNorm(num_groups=32, num_channels=in_channels)
-        self.conv_feature = nn.Conv2d(in_channels=in_channels,
-                                      out_channels=out_channels, 
-                                      kernel_size=3, 
-                                      padding=1)
-        self.linear_time = nn.Linear(in_features=n_times,
-                                     out_features=out_channels)
-        
-        self.groupnorm_merged = nn.GroupNorm(num_groups=num_groups,
-                                             num_channels=out_channels)
-        self.conv_merged = nn.Conv2d(in_channels=out_channels, 
-                                     out_channels=out_channels)
-        
 
-        if in_channels == out_channels:
-            self.residual_layer = nn.Identity()
-        else:
-            self.residual_layer = nn.Conv2d(in_channels=in_channels,
-                                            out_channels=out_channels,
-                                            kernel_size=3, 
-                                            padding=1)
+class Upsample(nn.Module):
+    def __init__(self, channels: int):
+        super().__init__()
+        self.blocks = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
+            nn.Conv2d(in_channels=channels, out_channels=channels, 
+                                        kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_features=channels),
+            nn.ReLU(),
+        )
+            
+    def forward(self, x: torch.Tensor):
+        # [B, channels, H, W] => [B, channels, H*2, W*2]
+        x = self.blocks(x)
+        return x        
+
+
+class DownSamle(nn.Module):
+    def __init__(self, channels: int):
+        super().__init__()
+        self.blocks = nn.Sequential(
+            nn.Conv2d(in_channels=channels, 
+                              out_channels=channels, 
+                              kernel_size=3,
+                              stride=2,
+                              padding=1),
+            nn.BatchNorm2d(num_features=channels),
+            nn.ReLU(),
+        )
     
     def forward(self, x: torch.Tensor):
-        
-        # x: [B, in_channels, H, W]
-        # time: [1, n_time]
-
-        shortcut = x
-        # [B, in_channels, H, W] => [B, in_channels, H, W]
-        x = F.silu(x)
-        # [B, in_channels, H, W] => [B, in_channels, H, W
-        x = self.groupnorm_feature(x)
-        # [B, in_channels, H, W] => [B, out_channels, H, W]
-        x = self.conv_feature(x)
-        
-        # [B, 1, n_times] => [B, 1, n_times]
-        time = F.silu(time)
-        # [B, 1, n_times] => [B, 1, out_channels]
-        time = self.linear_time(time) 
-        # [B, 1, out_channels] => [B, out_channels, 1] => [B, out_channels, 1, 1]
-        time = time.transpose(-2, -1)[..., None]
-        # [B, out_channels, H, W] +  [B, out_channels, 1, 1] =  [B, out_channels, H, W]
-        merged = x + time
-        # [B, out_channels, H, W] => [B, out_channels, H, W]
-        merged = self.groupnorm_merged(merged)
-        # [B, out_channels, H, W] => [B, out_channels, H, W]
-        merged = self.conv_merged(merged)
-        # [B, in_channels, H, W] => [B, out_channels, H, W]
-        shortcut = self.residual_layer(shortcut)
-        # [B, out_channels, H, W] + [B, out_channels, H, W] = [B, out_channels, H, W]
-        merged_shortcut = merged + shortcut
-        return merged_shortcut # [B, out_channels, H, W]
+        # [B, channels, H, W] => [B, channels, H*2, W*2]
+        x = self.blocks(x)
+        return x
     
 
-class UnetAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, num_heads: int=1, num_groups: int=32):
+class UnetBlock(nn.Module):
+    def __init__(self, 
+                 in_channels: int,
+                 out_channels: int,
+                 d_model: int,
+                 num_heads: int,
+                 num_groups: int=32,
+                 n_times: int=1280):
         super().__init__()
-        self.groupnorm_inp = nn.GroupNorm(num_channels=None, 
-                                          num_groups=num_groups)
-        self.conv_inp = nn.Conv2d(in_channels=None,
-                                  out_channels=None,
-                                  kernel_size=3, 
-                                  padding=1)
-        
-        self.layernorm1 = nn.LayerNorm(normalized_shape=None)
-        self.self_attn = SelfAttention(num_heads=num_heads, 
-                                       d_model=d_model)
-        
-        self.layernorm2 = nn.LayerNorm(normalized_shape=None)
-        self.cross_attn = CrossAttention(num_heads=num_heads, 
-                                         dim_Q=d_model, 
-                                         dim_KV=d_model)
-        self.layernorm3 = nn.LayerNorm(normalized_shape=None)
 
-        self.linear1 = nn.Linear(in_features=None, 
-                                 out_features=None)
-        self.linear2 = nn.Linear(in_features=None, 
-                                 out_features=None)
+        self.residual = UnetResidualBlock(in_channels=in_channels,
+                                          out_channels=out_channels,
+                                          num_groups=num_groups,
+                                          n_times=n_times)
+        self.attention = UnetAttentionBlock(d_model=d_model,
+                                            num_heads=num_heads,
+                                            num_groups=num_groups)
         
-        self.conv_output = nn.Conv2d(in_channels=None,
-                                out_channels=None,
-                                kernel_size=3, 
-                                padding=1)
+    def forward(self, x: torch.Tensor, context: torch.Tensor, time: torch.Tensor):
+        # [B, in_channels, H, W] => [B, out_channels, H, W]
+        x = self.residual(x, time)
+        # out_channels = num_heads * d_model
+        # [B, out_channels, H, W] => [B, out_channels, H, W]
+        x = self.attention(x, context)
+        return x
         
-    def forward(self, x: torch.Tensor, context: torch.Tensor):
-        # shape x: [B, C, H, W]
-        # shape context: [B, seq_len_KV, dim_KV]
+
+class Unet(nn.Module):
+    def __init__(self, 
+                 d_model: int, 
+                 num_heads: int, 
+                 in_channels: int=4,
+                 num_groups: int=32, 
+                 n_times: int=1280):
+        super().__init__()
+        channels = num_heads * d_model
+        self.encoders = nn.ModuleList([
+
+            # [B, in_channels, H/8, W/8] => [B, channels, H/8, W/8]
+            nn.Conv2d(in_channels=in_channels, 
+                      out_channels=channels, 
+                      kernel_size=3, 
+                      padding=1),
+
+            # 1. [B, channels, H/8, W/8] => [B, channels, H/8, W/8]
+            *[UnetBlock(in_channels=channels, 
+                        out_channels=channels,
+                        d_model=d_model, 
+                        num_heads=num_heads) for _ in range(2)],
+            # [B, channels, H/8, W/8] => [B, channels, H/16, W/16]
+            DownSamle(channels=channels),
+
+            # 2. [B, channels, H/16, W/16] => [B, channels*2, H/16, W/16]
+            # because channels = d_model * num_heads so when channels increase 2 to then d_model increase 2
+            UnetBlock(in_channels=channels, 
+                      out_channels=channels*2, 
+                      d_model=d_model*2, 
+                      num_heads=num_heads),
+            UnetBlock(in_channels=channels*2,
+                      out_channels=channels*2,
+                      d_model=d_model*2, 
+                      num_heads=num_heads),
+            # [B, channels*2, H/16, W/16] => [B, channels*2, H/32, W/32]
+            DownSamle(channels=channels*2),
+
+            # 3. [B, channels*2, H/32, W/32] => [B, channels*4, H/32, W/32]
+            UnetBlock(in_channels=channels*2,
+                      out_channels=channels*4, 
+                      d_model=d_model*4, 
+                      num_heads=num_heads),
+            # [B, channels*4, H/32, W/32] => [B, channels*4, H/32, W/32]
+            UnetBlock(in_channels=channels*4,
+                      out_channels=channels*4,
+                      d_model=d_model*4,
+                      num_heads=num_heads),
+            # [B, channels*4, H/32, W/32] => [B, channels*4, H/64, W/64]
+            DownSamle(channels=channels*4),
+
+            # 4. pass through 2 Residuals block 
+            # [B, channels*4, H/64, W/64] => [B, channels*4, H/64, W/64]
+            *[UnetResidualBlock(in_channels=channels*4, 
+                                out_channels=channels*4)
+                                for _ in range(2)]
+        ]),
+
+        self.bottle_neck = nn.ModuleList([
+            # [B, channels*4, H/64, W/64] => [B, channels*4, H/64, W/64]
+            UnetBlock(in_channels=channels*4,
+                      out_channels=channels*4,
+                      d_model=d_model*4,
+                      num_heads=num_heads),
+            # [B, channels*4, H/64, W/64] => [B, channels*4, H/64, W/64]
+            UnetBlock(in_channels=channels*4,
+                      out_channels=channels*4,
+                      num_heads=num_heads,
+                      num_heads=num_heads)
+        ])
+
+        self.decoders = nn.ModuleList([
+            # 4'. [B, channel*4*2, H/64, W/64] => [B, channels*4, H/64, W/64]
+            # becauce inpute decoder concat the skip connection of the encoder 
+            UnetBlock(in_channels=channels*4*2,
+                      out_channels=channels*4,
+                      d_model=d_model*4,
+                      num_heads=num_heads),
+            # [B, channels*4, H/64, W/64] => [B, channels*4, H/32, W/32]
+            Upsample(channels=channels*4),
+
+            # 3'. [B, channels*4, H/32, W/32] => [B, channels*2, H/16, W/16]
+            UnetBlock(in_channels=channels*4, )
+        ])
+
+    def forward(self, x):
         pass
 
-        
+
+
 def main():
     d_model = 768
     n_times = 1280
