@@ -1,60 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# from attention import SelfAttention
-
-class SelfAttention(nn.Module):
-    def __init__(self, num_heads: int, d_model: int):
-        super().__init__()
-        self.num_heads = num_heads
-        self.head_dim = d_model // num_heads
-
-        self.Wq = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
-        self.Wk = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
-        self.Wv = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
-        self.Wo = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
-    
-    def split_heads(self, x: torch.Tensor) -> torch.Tensor:
-        B, seq_len, d_model = x.size()
-        return x.view(B, self.num_heads, seq_len, self.head_dim)
-    
-    def scaled_dot_product_attention(self, 
-                                     Q: torch.Tensor, 
-                                     K: torch.Tensor, 
-                                     V: torch.Tensor, 
-                                     causal_mask: bool=False):
-        
-        matmul_QK = torch.matmul(Q, K.transpose(-2, -1)) # [B, num_heads, seq_len, seq_len]
-
-        scaled_dot_product = matmul_QK / self.head_dim # [B, num_heads, seq_len, seq_len]
-        
-        if causal_mask:
-            # Mask where the upper triangle (above the principal diagonal) is 1
-            mask = torch.ones_like(scaled_dot_product, dtype=torch.bool).triu(diagonal=1)
-            # Fill the upper triangle with -inf
-            scaled_dot_product.masked_fill_(mask, value=-torch.inf)
-        
-        attentions_scores = F.softmax(input=scaled_dot_product, dim=-1) # [B, num_heads, seq_len, seq_len]
-        
-        # [B, num_heads, seq_len, seq_len] @ [B, num_heads, seq_len, head_dim] = [B, num_heads, seq_len, head_dim]
-        output = torch.matmul(attentions_scores, V)
-        return output, attentions_scores # [B, num_heads, seq_len, seq_len]
-
-
-    def forward(self, x: torch.Tensor, causal_mask: bool=False) -> torch.Tensor:
-        # shape x: [B, seq_len, d_model]
-
-        # [B, seq_len, d_model] => [B, seq_len, d_model] => [B, num_heads, seq_len, head_dim]
-        Q = self.split_heads(self.Wq(x)) 
-        K = self.split_heads(self.Wk(x))
-        V = self.split_heads(self.Wv(x))
-
-        output, attention_scores = self.scaled_dot_product_attention(Q=Q, K=K, V=V, causal_mask=causal_mask)
-
-        output = output.transpose(1, 2).contiguous().view(*x.size()) # [B, seq_len, d_model]
-        output = self.Wo(output) # [B, seq_len, d_model]
-        return output # [B, seq_len, d_model]
-    
+from attention import SelfAttention
 
 class VAEResidualBlock(nn.Module):
     def __init__(self, 
