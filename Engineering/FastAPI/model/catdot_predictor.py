@@ -5,7 +5,10 @@ from PIL import Image
 from torch.nn import functional as F
 from torchvision import transforms
 from config import CatDogConfig
+from logs.logger import Logger
 
+LOGGER = Logger(name=__file__, log_file="predictor.log")
+LOGGER.log.info("Starting model serving")
 
 class CatDogModel(nn.Module):
     def __init__(self, n_classes: int):
