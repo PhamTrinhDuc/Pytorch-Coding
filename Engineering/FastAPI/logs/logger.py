@@ -29,12 +29,12 @@ class Logger:
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
     
-    def _add_file_handler(self):
+    def _add_stream_handler(self):
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(self.formatter)
         self.log.addHandler(stream_handler)
     
-    def _add_stream_handler(self, log_file: Path):
+    def _add_file_handler(self, log_file: Path):
         file_handler = RotatingFileHandler(filename=log_file, maxBytes=10000, backupCount=10)
         file_handler.setFormatter(self.formatter)
         self.log.addHandler(file_handler)

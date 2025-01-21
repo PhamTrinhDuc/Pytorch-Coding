@@ -4,7 +4,7 @@ from torchvision.models import resnet18
 from PIL import Image
 from torch.nn import functional as F
 from torchvision import transforms
-from config import CatDogConfig
+from config import CatDogConfig, ModelConfig
 from logs.logger import Logger
 
 LOGGER = Logger(name=__file__, log_file="predictor.log")
@@ -31,9 +31,6 @@ class CatDogModel(nn.Module):
         x = self.fc(x)
         return x
 
-model = CatDogModel(n_classes=2)
-model.load_state_dict(torch.load(f="./model/weight/best.pt", 
-                          map_location=torch.device("cpu")))
 
 class CatDogPredictor:
     def __init__(self, 
@@ -52,8 +49,8 @@ class CatDogPredictor:
         try:
             model = CatDogModel(n_classes=2)
             model.load_state_dict(
-                state_dict=torch.load(f=self.model_path),
-                map_location=self.device
+                state_dict=torch.load(f=self.model_path, 
+                                      map_location=torch.device('cpu')),
             )
             model.eval()
             return model
@@ -63,7 +60,7 @@ class CatDogPredictor:
             return None
 
     def _create_transform(self):
-        transform = transform.Compose([
+        transform = transforms.Compose([
             transforms.Resize(size=(self.catdog_cfg.IMG_SIZE)),
             transforms.ToTensor(),
             transforms.Normalize(
@@ -75,24 +72,27 @@ class CatDogPredictor:
     
     def output2pred(self, output: torch.Tensor):
         probabilities = F.softmax(input=output, dim=1)
-        best_prob, best_id = torch.argmax(probabilities, dim=1)
+        
+        best_prob = torch.max(probabilities, dim=1)[0].item()
+        best_id = torch.max(probabilities, dim=1)[1].item()
+
         predicted_cls = self.catdog_cfg.ID2LABEL[best_id]
         return probabilities, best_prob, best_id, predicted_cls
     
-    async def _model_inference(self, input: torch.Tensor):
+    def _model_inference(self, input: torch.Tensor):
         with torch.no_grad():
             output = self.model(input.to(self.device)).cpu()
         
         return output
     
-    async def predict(self, image_path: str):
+    def predict(self, image_path: str):
         image = Image.open(image_path)
         if image.mode == 'RGBA':
             image = image.convert(mode="RGB")
         
         transform_img = self.transform(image)
         transform_img = transform_img.unsqueeze(0) # add batch dimension
-        output = await self._model_inference(transform_img)
+        output = self._model_inference(transform_img)
         probs, best_probs, predicted_id, predicted_cls = self.output2pred(
             output=output
         )
@@ -105,7 +105,19 @@ class CatDogPredictor:
         resp_dict = {
             "probs": probs,
             "best_probs": best_probs,
-            "predicted_id" : predicted_id,
+            "predicted_cls" : predicted_cls,
             "predictor_name" : self.model_name
         }
         return resp_dict
+
+def main():
+    config = ModelConfig()
+    predictor = CatDogPredictor(model_name=config.MODEL_NAME, 
+                                model_path=config.MODEL_WEIGHT,
+                                device=config.DEVICE)
+
+    output = predictor.predict(image_path="./images/golden_dog.png")
+    print(output)
+
+if __name__ == "__main__":
+    main()

@@ -14,5 +14,5 @@ class CatDogConfig:
 class ModelConfig:
     ROOT_DIR = Path(__file__).parent.parent
     MODEL_NAME = "retnest18"
-    MODEL_WEIGHT = ROOT_DIR/'model'/'weights'/'best.pt'
+    MODEL_WEIGHT = ROOT_DIR/'model'/'weight'/'best.pt'
     DEVICE = 'cpu'
