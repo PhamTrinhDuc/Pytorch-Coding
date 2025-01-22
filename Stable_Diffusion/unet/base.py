@@ -2,23 +2,24 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from unet.template import UnetAttentionBlock, UnetResidualBlock
-
+from config import UnetArgs
 
 class TimeEmbedding(nn.Module):
-    def __init__(self, d_model: int):
-        self.linear1 = nn.Linear(in_features=d_model, 
-                                 out_features=d_model*4)
-        self.linear2 = nn.Linear(in_features=d_model*4, 
-                                 out_features=d_model)
+    def __init__(self, n_times: int):
+        super().__init__()
+        self.linear1 = nn.Linear(in_features=n_times, 
+                                 out_features=n_times*4)
+        self.linear2 = nn.Linear(in_features=n_times*4, 
+                                 out_features=4*n_times)
         self.silu = nn.SiLU()
         
     def forward(self, x: torch.Tensor):
-        # shape x: [1, d_model]
-        # [1, d_model] => [1, d_model*4]
+        # shape x: [1, n_times]
+        # [1, n_times] => [1, n_times*4]
         x = self.linear1(x)
-        # [1, d_model] => [1, d_model*4]
+        # [1, n_times] => [1, n_times*4]
         x = self.silu(x)
-        # [1, d_model*4] => [1, d_model]
+        # [1, n_times*4] => [1, n_times*4]
         x = self.linear2(x)
         return x
 
@@ -45,10 +46,10 @@ class DownSample(nn.Module):
         super().__init__()
         self.blocks = nn.Sequential(
             nn.Conv2d(in_channels=channels, 
-                              out_channels=channels, 
-                              kernel_size=3,
-                              stride=2,
-                              padding=1),
+                      out_channels=channels, 
+                      kernel_size=3,
+                      stride=2,
+                      padding=1),
             nn.BatchNorm2d(num_features=channels),
             nn.ReLU(),
         )
@@ -63,7 +64,7 @@ class SwitchSequential(nn.Sequential):
     def forward(self, x: torch.Tensor, context: torch.Tensor, time: torch.Tensor):
         # x: [B, 4, H/8, W/8]: output of ther VAE encoder
         # context: [B, seq_len_KV, dim_KV]
-        # time: [B, 1, 1280]
+        # time: [B, 1, n_times*4]
 
         for layer in self:
             if isinstance(layer, UnetAttentionBlock):
@@ -79,9 +80,9 @@ class Unet(nn.Module):
     def __init__(self, 
                  d_model: int, 
                  num_heads: int, 
-                 in_channels: int=4,
+                 in_channels: int=4, # output channels of the VAE encoder
                  num_groups: int=32, 
-                 n_times: int=1280):
+                 n_times: int=320*4):
         super().__init__()
         channels = num_heads * d_model
 
@@ -219,21 +220,21 @@ class Unet(nn.Module):
             # 7'. [B, channels*6, H/32, W/32] => [B, channels*4, H/32, W/32] => [B, channels*4, H/16, W/16]
             SwitchSequential(
                 UnetResidualBlock(in_channels=channels*6,
-                                  out_channels=channels*4),
-                UnetAttentionBlock(d_model=d_model*4, 
+                                  out_channels=channels*2),
+                UnetAttentionBlock(d_model=d_model*2, 
                                    num_heads=num_heads),
-                Upsample(channels=channels*4),
+                Upsample(channels=channels*2),
             ),
             # 6'. [B, channels*6, H/16, W/16] => [B, channels*4, H/16, W/16]
             SwitchSequential(
-                UnetResidualBlock(in_channels=channels*6,
-                                  out_channels=channels*4),
-                UnetAttentionBlock(d_model=d_model*3, 
+                UnetResidualBlock(in_channels=channels*4,
+                                  out_channels=channels*2),
+                UnetAttentionBlock(d_model=d_model*2, 
                                    num_heads=num_heads),
             ),
             # 5'. [B, channels*6, H/16, W/16] => [B, channels*2, H/16, W/16]
             SwitchSequential(
-                UnetResidualBlock(in_channels=channels*6,
+                UnetResidualBlock(in_channels=channels*4,
                                   out_channels=channels*2),
                 UnetAttentionBlock(d_model=d_model*2, 
                                    num_heads=num_heads),
@@ -275,26 +276,73 @@ class Unet(nn.Module):
         # time: [B, 1, 1280]
 
         skip_connection =[]
-        for layer in self.encoders:
+        # print("Output of encoder layers: ")
+        for i, layer in enumerate(self.encoders):
             x = layer(x, context, time)
+            # print(f"{i+1}: {x.shape}")
             skip_connection.append(x)
-        print("Output of encoder layers: ")
-        for i, x in enumerate(skip_connection):
-            print(f"{i+1}: {x.shape}")
 
-        # print("Output of the bottle neck: ")
-        # for i, layer in enumerate(self.bottle_neck):
-        #     x = layer(x, context, time)
-        #     print(f"{i+1}: {x.shape}")
+        # print("\nOutput of the bottle neck: ")
+        for i, layer in enumerate(self.bottle_neck):
+            x = layer(x, context, time)
+            # print(f"{i+1}: {x.shape}")
 
-        # print("Output of the encoder layers: ")
-        # for i, layer in enumerate(self.decoders):
-        #     x = torch.cat([x, skip_connection.pop()], dim=1)
-        #     x = layer(x, context, time)
-        #     print(f"{i+1}: {x.shape}")
-        #     if(i == 2):
-        #         break
-        # return x
+        # print("\nOutput of the encoder layers: ")
+        for i, layer in enumerate(self.decoders):
+            x = torch.cat([x, skip_connection.pop()], dim=1)
+            x = layer(x, context, time)
+            # print(f"{i+1}': {x.shape}")
+        return x
+
+
+class UnetOutLayer(nn.Module):
+    def __init__(self, 
+                 in_channels: int=320, 
+                 out_channels: int=4, 
+                 num_groups: int=32):
+        super().__init__()
+        self.norm = nn.GroupNorm(num_groups=num_groups, num_channels=in_channels)
+        self.conv_out = nn.Conv2d(in_channels=in_channels, 
+                                  out_channels=out_channels,
+                                  kernel_size=3, 
+                                  padding=1)
+    
+    def forward(self, x: torch.Tensor):
+        # x: output of Unet, shape: [B, in_channels, H/8, W/8]
+        # [B, in_channels, H/8, W/8] => [B, in_channels, H/8, W/8]
+        x = self.norm(x)
+        # [B, in_channels, H/8, W/8] => [B, out_channels, H/8, W/8]
+        x = self.conv_out(x)
+        return x
+
+
+class Diffusion(nn.Module):
+    def __init__(self, config: UnetArgs):
+        super().__init__()
+        self.time_embed = TimeEmbedding(n_times=config.n_times)
+
+        self.unet = Unet(d_model=config.d_model, 
+                         num_heads=config.num_heads,
+                         in_channels=config.hidden_channels, 
+                         num_groups=config.num_groups,
+                         n_times=config.n_times*4)
+        
+        self.out_layer = UnetOutLayer(in_channels=config.num_heads * config.d_model,
+                                      out_channels=config.hidden_channels, 
+                                      num_groups=config.num_groups)
+        
+    def forward(self, latent: torch.Tensor, context: torch.Tensor, times: torch.Tensor): 
+        # latent: (output of the encoder VAE). Shape: [B, config.hidden_channels, H/8, W/8]
+        # context: (output of the CLIP, usefull for cross-attention). Shape: [B, seq_len_KV, dim_KV]
+        # time: [B, 1, config.n_times]
+        # [B, 1, config.n_times] => [B, 1, config.n_times*4]
+        time_embed = self.time_embed(times)
+        # [B, config.hidden_channels, H/8, W/8] => [B, config.n_times, H/8, W/8]
+        output = self.unet(latent, context, time_embed)
+        # [B, config.n_times, H/8, W/8] => [B, config.hidden_channels, H/8, W/8]
+        output = self.out_layer(output)
+        return output
+
 
 def main():
     batch_size = 1
@@ -302,15 +350,17 @@ def main():
     d_context = 768
     seq_len = 77
     num_heads = 1
-    n_times = 1280
+    n_times = 320
     num_groups = 32
     H_img = W_img = 512
-    unet = Unet(d_model=d_model, num_heads=num_heads)
+    unet = Diffusion(UnetArgs())
 
     x = torch.randn(size=(batch_size, 4, H_img//8, W_img//8))
     time = torch.randn(size=(batch_size, 1, n_times))
     context = torch.randn(size=(batch_size, seq_len, d_context))
     output = unet(x, context, time)
+    print(output.shape)
+
 
 if __name__ == "__main__":
     main()
