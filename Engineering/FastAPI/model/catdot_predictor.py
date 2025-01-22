@@ -103,7 +103,7 @@ class CatDogPredictor:
         torch.cuda.empty_cache()
 
         resp_dict = {
-            "probs": probs,
+            "probs": probs.tolist(),
             "best_probs": best_probs,
             "predicted_class" : predicted_cls,
             "predictor_name" : self.model_name
