@@ -79,20 +79,20 @@ class CatDogPredictor:
         predicted_cls = self.catdog_cfg.ID2LABEL[best_id]
         return probabilities, best_prob, best_id, predicted_cls
     
-    def _model_inference(self, input: torch.Tensor):
+    async def _model_inference(self, input: torch.Tensor):
         with torch.no_grad():
             output = self.model(input.to(self.device)).cpu()
         
         return output
     
-    def predict(self, image_path: str):
-        image = Image.open(image_path)
+    async def predict(self, image):
+        image = Image.open(image)
         if image.mode == 'RGBA':
             image = image.convert(mode="RGB")
         
         transform_img = self.transform(image)
         transform_img = transform_img.unsqueeze(0) # add batch dimension
-        output = self._model_inference(transform_img)
+        output = await self._model_inference(transform_img)
         probs, best_probs, predicted_id, predicted_cls = self.output2pred(
             output=output
         )
@@ -105,7 +105,7 @@ class CatDogPredictor:
         resp_dict = {
             "probs": probs,
             "best_probs": best_probs,
-            "predicted_cls" : predicted_cls,
+            "predicted_class" : predicted_cls,
             "predictor_name" : self.model_name
         }
         return resp_dict

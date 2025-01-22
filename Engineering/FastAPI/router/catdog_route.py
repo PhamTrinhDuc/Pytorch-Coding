@@ -19,8 +19,11 @@ predictor = CatDogPredictor(
 
 router = APIRouter()
 
-@router.post("/predict")
+@router.post("/predict", response_model=CatDogResponse)
 async def predict(file_upload: UploadFile = File(...)):
-    response = await predictor.predict(image_path=file_upload.file)
+
+    response = await predictor.predict(
+        image=file_upload.file
+    )
     
-    return CatDogResponse(**response)
+    return response
