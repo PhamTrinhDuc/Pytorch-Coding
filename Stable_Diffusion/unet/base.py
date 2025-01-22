@@ -335,12 +335,16 @@ class Diffusion(nn.Module):
         # latent: (output of the encoder VAE). Shape: [B, config.hidden_channels, H/8, W/8]
         # context: (output of the CLIP, usefull for cross-attention). Shape: [B, seq_len_KV, dim_KV]
         # time: [B, 1, config.n_times]
+
+        
         # [B, 1, config.n_times] => [B, 1, config.n_times*4]
         time_embed = self.time_embed(times)
-        # [B, config.hidden_channels, H/8, W/8] => [B, config.n_times, H/8, W/8]
+        print("time embedding: ", time_embed.shape)
+        # [B, config.hidden_channels, H/8, W/8] => [B, d_model*num_heads, H/8, W/8]
         output = self.unet(latent, context, time_embed)
-        # [B, config.n_times, H/8, W/8] => [B, config.hidden_channels, H/8, W/8]
-        output = self.out_layer(output)
+        print("output unet: ", output.shape)
+        # [B, d_model*num_heads, H/8, W/8] => [B, config.hidden_channels, H/8, W/8]
+        # output = self.out_layer(output)
         return output
 
 
