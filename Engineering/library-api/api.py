@@ -29,6 +29,14 @@ def create_book(product: ProductCreate,
     db_book = Product(**product.dict())
     db.add(db_book)
     db.commit()
+    db.flush()
+
+    # Add tags
+    if product.tags:
+        # Get tag objects from database
+        tags = db.query(Tag).filter(Tag.id.in_(product.tags)).all()
+        db_book.tags = tags
+
     db.refresh(db_book)
     return db_book
 
