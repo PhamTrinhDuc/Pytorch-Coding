@@ -357,11 +357,12 @@ def main():
     n_times = 320
     num_groups = 32
     H_img = W_img = 512
-    unet = Diffusion(UnetArgs())
+    config = UnetArgs()
+    unet = Diffusion(config).to(config.device)
 
-    x = torch.randn(size=(batch_size, 4, H_img//8, W_img//8))
-    time = torch.randn(size=(batch_size, 1, n_times))
-    context = torch.randn(size=(batch_size, seq_len, d_context))
+    x = torch.randn(size=(batch_size, 4, H_img//8, W_img//8)).to(config.device)
+    time = torch.randn(size=(batch_size, 1, n_times)).to(config.device)
+    context = torch.randn(size=(batch_size, seq_len, d_context)).to(config.device)
     output = unet(x, context, time)
     print(output.shape)
 
