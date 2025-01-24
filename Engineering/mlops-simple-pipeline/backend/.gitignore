@@ -7,7 +7,5 @@
 
 __pycache__/
 *.jpg
-*.png 
-.env 
 debug.ipynb 
-.log
+*.log
