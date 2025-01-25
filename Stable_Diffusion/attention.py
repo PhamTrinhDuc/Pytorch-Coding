@@ -10,7 +10,6 @@ class SelfAttention(nn.Module):
         self.num_heads = num_heads
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
         self.head_dim = d_model // num_heads
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.Wq = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
         self.Wk = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
@@ -33,7 +32,7 @@ class SelfAttention(nn.Module):
         
         if causal_mask:
             # Mask where the upper triangle (above the principal diagonal) is 1
-            mask = torch.ones_like(scaled_dot_product, dtype=torch.bool).triu(diagonal=1).to(self.device)
+            mask = torch.ones_like(scaled_dot_product, dtype=torch.bool).triu(diagonal=1).to(Q.device)
             # Fill the upper triangle with -inf
             scaled_dot_product.masked_fill_(mask, value=-torch.inf)
         
