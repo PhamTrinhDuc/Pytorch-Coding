@@ -94,8 +94,8 @@ def process_image_input(input_image,
         latents = encoder(input_image_tensor)
         # add noise to the latents (the encoder input image)
         sampler.set_strength(strength=strength)
-        # [B, 4, latent_H, latent_W]
-        latents = sampler.add_noise(latents, sampler.timestep[0])
+        # [B, 4, latent_H, latent_W] -> [B, 4, latent_H, latent_W]
+        latents = sampler.add_noise(latents, sampler.timesteps[0])
 
     else:
         # [B, 4, latent_H, latent_W]

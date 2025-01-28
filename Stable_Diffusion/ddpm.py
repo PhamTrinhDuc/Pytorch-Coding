@@ -18,7 +18,7 @@ class DDPMSampler:
 
         self.num_traning_steps = num_training_steps
         self.generator = generator
-        self.timesteps = torch.from_numpy(ndarray=np.arange(0, num_training_steps)[::-1].copy())
+        self.timesteps = torch.from_numpy(np.arange(0, num_training_steps)[::-1].copy())
 
     def set_inference_time(self, ):
         pass
@@ -35,5 +35,48 @@ class DDPMSampler:
     def step(self):
         pass
 
-    def add_noise(self):
-        pass
+
+    def add_noise(self, 
+                  original_samples: torch.FloatTensor,
+                  timestep: torch.IntTensor) -> torch.FloatTensor:
+        """forward process"""
+
+        # tensor([1])
+        sqrt_alpha_prod = self.alpha_cumprod[timestep] ** 0.5
+        # tensor([1])
+        # sqrt_alpha_prod = sqrt_alpha_prod.flatten()
+
+        # [1] -> [1, 1, 1, 1]
+        # while(len(sqrt_alpha_prod) < len(original_samples)):
+        #     sqrt_alpha_prod = sqrt_alpha_prod.unsqueeze(-1)
+        
+        # tensor([1])
+        sqrt_one_minus_alpha_prod = (1 - self.alpha_cumprod[timestep]) ** 0.5
+        # tensor([1])
+        # sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
+
+        # [1] -> [1, 1, 1, 1]
+        # while(len(sqrt_one_minus_alpha_prod) < len(original_samples)):
+        #     sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.unsqueeze(-1)
+
+        # from images/kernel_trick.png
+        noise = torch.randn(size=original_samples.shape,
+                            generator=self.generator,
+                            device=original_samples.device,
+                            dtype=original_samples.dtype)
+        # [B, 4, latent_H, latent_W] -> [B, 4, latent_H, latent_W
+        noise_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
+        return noise_samples # [B, 4, latent_H, latent_W
+    
+
+def debug():
+    sampler = DDPMSampler(
+        generator=torch.Generator(device="cpu")
+    )
+    latents = torch.randn(size=(1, 4, 64, 64))
+    noise_added = sampler.add_noise(original_samples=latents,
+                                    timestep=torch.tensor([1]))
+    print(noise_added.shape)
+
+if __name__ == "__main__":
+    debug()
