@@ -149,7 +149,7 @@ def generate(prompt: str,
         # Initialize random number generator according to the seed specified
         generator = torch.Generator(device=device)
         if seed is not None:
-            generator.seed(seed)
+            generator.seed()
         else:
             generator.manual_seed(seed=seed)
         
