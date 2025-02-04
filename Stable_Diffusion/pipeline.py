@@ -19,7 +19,6 @@ def rescale(x, old_range: tuple, new_range: tuple, clamp: bool=False):
         x = x.clamp(new_min, new_max)
     return x
 
-
 def get_time_embedding(timestep):
     # Shape: (160,)
     freqs = torch.pow(10000, -torch.arange(start=0, end=160, dtype=torch.float32) / 160) 
@@ -27,7 +26,6 @@ def get_time_embedding(timestep):
     x = torch.tensor([timestep], dtype=torch.float32)[:, None] * freqs[None]
     # Shape: (1, 160 * 2)
     return torch.cat([torch.cos(x), torch.sin(x)], dim=-1)
-
 
 def process_prompt_input(
         do_cfg: bool, 
@@ -70,7 +68,6 @@ def process_prompt_input(
         context = clip_model(prompt_tokens)
 
     return context
-
 
 def process_image_input(input_image, 
                         sampler, 
@@ -197,7 +194,7 @@ def generate(prompt: str,
                 # [B, 4, latent_H, latent_W]
                 input_model = latents
                 # [B, 4, latent_H, latent_W] => [B*2, 4, latent_H, latent_W]
-                #I do this because the output will return for uncondional and conditonal
+                # I do this because the output will return for uncondional and conditonal
                 input_model = input_model.repeat(2, 1, 1, 1)
 
             output_model = diffusion(input_model, context, time_embedding)
