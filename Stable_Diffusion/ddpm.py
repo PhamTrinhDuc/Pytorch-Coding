@@ -29,7 +29,7 @@ class DDPMSampler:
         self.generator = generator
         self.timesteps = torch.from_numpy(np.arange(0, num_training_steps)[::-1].copy())
 
-    def set_inference_time(self, num_inference_time:int = 50):
+    def set_inference_timestep(self, num_inference_time:int = 50):
         """
         Chia quá trình khử nhiễu thành số lượng bước mong muốn (ví dụ: 50 thay vì 1000).
         Trong thực tế, mô hình không cần thiết phải khử nhiễu qua 1000 bước như khi huấn luyện. 
