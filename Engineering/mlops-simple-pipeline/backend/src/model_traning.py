@@ -111,4 +111,5 @@ def main():
     trainer.train()
     LOGGER.log.info(f"Model Training Completed. Model: {args.model_name}, Data: {args.data_version}")
 
-
+if __name__ == "__main__":
+    main()
