@@ -2,7 +2,7 @@ from clip import CLIP
 from vae.encoder import VaeEncoder
 from vae.decoder import VaeDecoder
 from diffusion import Diffusion
-from config import VaeArgs, CLIPArgs, DiffusionArgs
+from config import VaeArgs, CLIPArgs, UnetArgs
 
 def preload_models_from_standard_weights():
     
@@ -16,11 +16,12 @@ def preload_models_from_standard_weights():
                          hidden_decode=VaeArgs.hidden_decode_channels,
                          num_groups=VaeArgs.num_groups)
     clip = CLIP(vocab_size=CLIPArgs.vocab_size,
+                seq_len=CLIPArgs.seq_len,
                 d_model=CLIPArgs.d_model,
                 num_layers=CLIPArgs.num_layers,
                 num_heads=CLIPArgs.num_heads)
     
-    diffusion = Diffusion(config=DiffusionArgs)
+    diffusion = Diffusion(config=UnetArgs)
 
     return {
         "clip": clip,
