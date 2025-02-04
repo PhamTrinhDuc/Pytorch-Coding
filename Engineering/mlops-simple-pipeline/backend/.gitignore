@@ -10,3 +10,4 @@ __pycache__/
 debug.ipynb 
 *.log
 docker/mlflow/run_env
+mlruns

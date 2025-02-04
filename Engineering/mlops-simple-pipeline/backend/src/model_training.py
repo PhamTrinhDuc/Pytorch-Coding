@@ -17,7 +17,7 @@ def main():
     parser.add_argument("--model_name", type=str, default="retnest18",
                         choices=["resnet18", "resnet34", "mobilenet_v2", "mobilenet_v3_small"], 
                         help="Model to be used for training")
-    parser.add_argument("--epochs", type=int, default=20, 
+    parser.add_argument("--epochs", type=int, default=5, 
                         help="Batch size for training")
     parser.add_argument("--batch_size", type=int, default=32, 
                         help="Batch size for training")
@@ -59,6 +59,19 @@ def main():
         root=data_path/"test",
         transform=CatDogArgs.test_transform
     )
+
+    # -------------- create model 
+    if args.model_name in ['mobilenet_v2', 'mobilenet_v3_small']:
+        model = create_mobilenet(n_classes=CatDogArgs.n_classes, 
+                                 model_name=args.model_name,
+                                 load_pretrained=True)
+    elif args.model_name in ["resnet18", "resnet34"]:
+        model = create_retnest(n_classes=CatDogArgs.n_classes, 
+                               model_name=args.model_name, 
+                               load_pretrained=True)
+    else:
+        LOGGER.log.warning(msg="Invalid model. Choose in [resnet18, resnet34, mobilenet_v2, mobilenet_v3_small]")
+    
     # ------------- create log mlflow
     mlflow_log_tags = {
         "data_version": args.data_version,
@@ -66,7 +79,7 @@ def main():
         "label2id": CatDogArgs.label2id
     }
     mlflow_log_params = {
-        "model": model.__clas__.__name__, 
+        "model": model.__class__.__name__, 
         "model_name": args.model_name,
         "n_epochs": args.epochs,
         "batch_size": args.batch_size, 
@@ -81,18 +94,6 @@ def main():
         "image_std": CatDogArgs.std,
     }
 
-    # -------------- create model 
-    if args.model_name in ['mobilenet_v2', 'mobilenet_v3_small']:
-        model = create_mobilenet(n_classes=CatDogArgs.n_classes, 
-                                 model_name=args.model_name,
-                                 load_pretrained=True)
-    elif args.model_name in ["resnet18", "resnet34"]:
-        model = create_retnest(n_classes=CatDogArgs.n_classes, 
-                               model_name=args.model_name, 
-                               load_pretrained=True)
-    else:
-        LOGGER.log.warning(msg="Invalid model. Choose in [resnet18, resnet34, mobilenet_v2, mobilenet_v3_small]")
-    
     # -------------- training
     trainer = Trainer(
         model=model,

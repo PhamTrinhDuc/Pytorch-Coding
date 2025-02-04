@@ -2,12 +2,16 @@ import os
 import json
 import mlflow
 import argparse
+from pathlib import Path
+from dotenv import load_dotenv
 from dataclasses import asdict
 from mlflow.tracking import MlflowClient
 from config.serve_config import BaseServeArgs
 from utils import Logger, AppPath
 
-LOGGER = Logger(name=__file__)
+load_dotenv()
+LOGGER = Logger(name=__file__, 
+                log_file="model_registry.log")
 LOGGER.log.info("Start model registry...")
 
 
@@ -25,20 +29,24 @@ def main():
     args = parser.parse_args()
 
     MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI")
-    MLFLOW_EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME")
     mlflow.set_tracking_uri(uri=MLFLOW_TRACKING_URI)
-    experiment_ids = dict(mlflow.get_experiment_by_name(name=MLFLOW_EXPERIMENT_NAME))['experiment_id']
+    LOGGER.log.info(f"MLFLOW_TRACKING_URI: {MLFLOW_TRACKING_URI}")
 
+    MLFLOW_EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME")
+    experiment_ids = dict(mlflow.get_experiment_by_name(MLFLOW_EXPERIMENT_NAME))['experiment_id']
+    
     client = MlflowClient()
 
     try:
         # search experiments 
-        best_runs = client.search_runs(experiment_ids=experiment_ids, 
-                                       filter_string=args.filer_string,
-                                       order_by=f"metrics.{args.best_metric} DESC")[-1]
-    
-    except:
-        LOGGER.log.info("Not runs found")
+        best_runs = client.search_runs(experiment_ids, 
+                                       filter_string=args.filter_string,
+                                       order_by=[f"metrics.{args.best_metric} DESC"]
+                                       )[-1]
+
+    except Exception as e:
+        LOGGER.log.error("Error occurred while registy model: " + str(e))
+        LOGGER.log.info("Runs not found")
         exit(0)
     
     model_name = best_runs.data.params['model_name']
@@ -59,7 +67,8 @@ def main():
     server_config = BaseServeArgs(config_name=args.config_name, 
                                   model_name=model_name,
                                   model_alias=args.model_alias)
-    path_save_cfg = AppPath.SERVE_CONFIG / f"{args.config_name}.json"
+    
+    path_save_cfg = AppPath.ARTIFACTS / f"{args.config_name}.json"
     with open(path_save_cfg, mode="w+") as f:
         json.dump(obj=asdict(server_config), fp=f, indent=4)
     
@@ -67,3 +76,6 @@ def main():
 
     LOGGER.log.info(f"Model {model_name} registered with alias {args.model_alias} and version {mv.version}")
     LOGGER.log.info("Model Registry completed")
+
+if __name__ == "__main__":
+    main()

@@ -7,8 +7,7 @@ class AppPath:
     SOURCE_DIR = ROOT_DIR / "src" # cd to src folder
 
     CONFIG_DIR = SOURCE_DIR / "config"
-    SERVE_CONFIG = CONFIG_DIR / "serve_config"
-    DATA_CONFIG = CONFIG_DIR / "data_config"
+    ARTIFACTS = SOURCE_DIR / "Artifacts"
 
     DATA_DIR = ROOT_DIR / "raw_data"
     RAW_DATA_DIR = DATA_DIR / "catdog_raw"

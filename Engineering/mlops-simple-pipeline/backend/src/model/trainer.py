@@ -84,8 +84,8 @@ class Trainer:
                 **self.mlflow_log_params
             })
 
-            best_val_loss = float("inf")
-            best_val_acc  = float("-inf")
+            best_val_loss = 9999999
+            best_val_acc  = -9999999
             best_val_loss_state_dict = None
             best_val_acc_state_dict = None
 
@@ -158,7 +158,7 @@ class Trainer:
             for inputs, labels in data_loader:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = self.model(inputs)
-                loss = self.criterion(outputs)
+                loss = self.criterion(outputs, labels)
 
                 running_loss += loss.item()
                 running_acc += (torch.argmax(outputs, dim=1) == labels).sum().item()
