@@ -292,15 +292,16 @@ def main():
     # print(output.shape)
 
     # ============================ LLama-2 Layer
-    mock_data = torch.randint(0, 10, size=(args.batch_size, args.seq_len))
+    mock_data = torch.randint(0, 10, size=(1, args.seq_len))
     st_pos = 1
     mock_data = mock_data[:, st_pos: st_pos+5]
 
     llama_layer = Llama2Layer(args=args)
-    print(llama_layer)
-    output = llama_layer(mock_data, st_pos=st_pos)
-    print(output.shape)
+    # print(llama_layer)
+    logits = llama_layer(mock_data, st_pos=st_pos)
 
+    next_token = torch.argmax(logits[:, -1, :], dim=-1)
+    print(next_token.shape)
 
 if __name__ == "__main__":
     main()
