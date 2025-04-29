@@ -15,10 +15,10 @@ GRPO là một thuật toán học tăng cường (reinforcement learning - RL) 
 
 # 4. GRPO sử dụng các hàm reward này như sau:
 
-## 4.1 Sinh nhiều output (sampling):
+### 4.1 Sinh nhiều output (sampling):
 Trong mỗi bước huấn luyện, LLM tạo ra nhiều output (gọi là "nhóm" output) cho một câu hỏi nhất định. Số lượng output được cấu hình bởi tham số num_generations (trong tài liệu là 8).
 Ví dụ: Đối với câu hỏi "Giá trị của x là bao nhiêu?", LLM có thể tạo ra 8 output khác nhau, mỗi output có phần suy nghĩ và đáp án.
-## 4.2 Đánh giá từng output bằng hàm reward:
+### 4.2 Đánh giá từng output bằng hàm reward:
 - Mỗi output được đánh giá bởi tất cả các hàm reward:
 - match_format_exactly: Kiểm tra định dạng hoàn toàn khớp (+3.0 nếu khớp, 0 nếu không).
 - match_format_approximately: Kiểm tra từng thẻ riêng lẻ (+0.5 hoặc -1.0 cho mỗi thẻ).
@@ -29,18 +29,18 @@ Kết quả là mỗi output nhận được một tổng điểm thưởng (sum
 # 5. Minh họa cụ thể 
 - "Reggie mua 5 cuốn sách giá x đô la, chi 10 đô la, x là bao nhiêu?"
 - LLM tạo ra hai output:
-Output 1: <thinking>5x = 10, x = 10/5 = 2</thinking><SOLUTION>2</SOLUTION>
-  match_format_exactly: +3.0 (định dạng đúng).
-  match_format_approximately: +2.0 (4 thẻ, mỗi thẻ +0.5).
-  check_answer: +3.0 (đáp án 2 khớp hoàn toàn).
-  check_numbers: +1.5 (giá trị số 2 đúng).
-  Tổng: 3.0 + 2.0 + 3.0 + 1.5 = 9.5 điểm.
+  - Output 1: <thinking>5x = 10, x = 10/5 = 2</thinking><SOLUTION>2</SOLUTION>
+    match_format_exactly: +3.0 (định dạng đúng).
+    match_format_approximately: +2.0 (4 thẻ, mỗi thẻ +0.5).
+    check_answer: +3.0 (đáp án 2 khớp hoàn toàn).
+    check_numbers: +1.5 (giá trị số 2 đúng).
+    Tổng: 3.0 + 2.0 + 3.0 + 1.5 = 9.5 điểm.
 
-Output 2: Đáp án là 3
-  match_format_exactly: 0 (thiếu định dạng).
-  match_format_approximately: -4.0 (không có thẻ nào).
-  check_answer: -1.5 (đáp án sai).
-  check_numbers: -0.5 (giá trị số sai).
-  Tổng: 0 - 4.0 - 1.5 - 0.5 = -6.0 điểm.
+  - Output 2: Đáp án là 3
+    match_format_exactly: 0 (thiếu định dạng).
+    match_format_approximately: -4.0 (không có thẻ nào).
+    check_answer: -1.5 (đáp án sai).
+    check_numbers: -0.5 (giá trị số sai).
+    Tổng: 0 - 4.0 - 1.5 - 0.5 = -6.0 điểm.
 
 - GRPO sẽ ưu tiên Output 1 (điểm cao hơn) và điều chỉnh mô hình để tăng xác suất tạo ra các output tương tự Output 1 trong tương lai.
