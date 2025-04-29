@@ -30,17 +30,17 @@ Kết quả là mỗi output nhận được một tổng điểm thưởng (sum
 - "Reggie mua 5 cuốn sách giá x đô la, chi 10 đô la, x là bao nhiêu?"
 - LLM tạo ra hai output:
   - Output 1: <thinking>5x = 10, x = 10/5 = 2</thinking><SOLUTION>2</SOLUTION>
-    match_format_exactly: +3.0 (định dạng đúng).
-    match_format_approximately: +2.0 (4 thẻ, mỗi thẻ +0.5).
-    check_answer: +3.0 (đáp án 2 khớp hoàn toàn).
-    check_numbers: +1.5 (giá trị số 2 đúng).
-    Tổng: 3.0 + 2.0 + 3.0 + 1.5 = 9.5 điểm.
+    - match_format_exactly: +3.0 (định dạng đúng).
+    - match_format_approximately: +2.0 (4 thẻ, mỗi thẻ +0.5).
+    - check_answer: +3.0 (đáp án 2 khớp hoàn toàn).
+    - check_numbers: +1.5 (giá trị số 2 đúng).
+    - Tổng: 3.0 + 2.0 + 3.0 + 1.5 = 9.5 điểm.
 
   - Output 2: Đáp án là 3
-    match_format_exactly: 0 (thiếu định dạng).
-    match_format_approximately: -4.0 (không có thẻ nào).
-    check_answer: -1.5 (đáp án sai).
-    check_numbers: -0.5 (giá trị số sai).
-    Tổng: 0 - 4.0 - 1.5 - 0.5 = -6.0 điểm.
+    - match_format_exactly: 0 (thiếu định dạng).
+    - match_format_approximately: -4.0 (không có thẻ nào).
+    - check_answer: -1.5 (đáp án sai).
+    - check_numbers: -0.5 (giá trị số sai).
+    - Tổng: 0 - 4.0 - 1.5 - 0.5 = -6.0 điểm.
 
 - GRPO sẽ ưu tiên Output 1 (điểm cao hơn) và điều chỉnh mô hình để tăng xác suất tạo ra các output tương tự Output 1 trong tương lai.
